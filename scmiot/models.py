@@ -189,30 +189,30 @@ class OTintNMF():
         return self.eps*loss
 
     def fit_transform(self, mdata, cost='cosine', n_iter_inner=25, n_iter=25, device='cpu'):
-        self.A, self.H, self.GH, self.GW, optimizer_h, K = {}, {}, {}, {}, {}, {}
+        A, self.H, self.GH, self.GW, optimizer_h, K = {}, {}, {}, {}, {}, {}
         self.losses_h = {}
         self.losses_w = []
 
         for mod in mdata.mod: # For each modality...
 
             # ... Generate datasets
-            self.A[mod] = mdata[mod].X[:,mdata[mod].var['highly_variable'].to_numpy()]
+            A[mod] = mdata[mod].X[:,mdata[mod].var['highly_variable'].to_numpy()]
             try:
-                self.A[mod] = self.A[mod].todense()
+                A[mod] = A[mod].todense()
             except:
                 pass
 
             # Normalize datasets
-            self.A[mod] = 1e-6 + self.A[mod].T
-            self.A[mod] /= self.A[mod].sum(0)
+            A[mod] = 1e-6 + A[mod].T
+            A[mod] /= A[mod].sum(0)
 
             # Compute K
-            C = torch.from_numpy(cdist(self.A[mod], self.A[mod], metric=cost)).to(device=device, dtype=torch.float)
+            C = torch.from_numpy(cdist(A[mod], A[mod], metric=cost)).to(device=device, dtype=torch.float)
             C /= C.max()
             K[mod] = torch.exp(-C/self.eps)
 
             # send to PyTorch
-            self.A[mod] = torch.from_numpy(self.A[mod]).to(device=device, dtype=torch.float)
+            A[mod] = torch.from_numpy(A[mod]).to(device=device, dtype=torch.float)
 
             # ... Generate H_i
             n_vars = mdata[mod].var['highly_variable'].sum()
@@ -250,7 +250,7 @@ class OTintNMF():
             for mod in mdata.mod:
                 def closure():
                     optimizer_h[mod].zero_grad()
-                    loss_h[mod] = self.ot_dual_loss(self.A[mod], K[mod], self.GH[mod])
+                    loss_h[mod] = self.ot_dual_loss(A[mod], K[mod], self.GH[mod])
                     loss_h[mod] -= self.rho_h*self.entropy_dual_loss(-self.GH[mod]@self.W.T/self.rho_h)
                     self.losses_h[mod].append(loss_h[mod].detach())
                     loss_h[mod].backward()
@@ -268,7 +268,7 @@ class OTintNMF():
                 htgw = 0
                 for mod in mdata.mod:
                     htgw += self.H[mod].T@self.GW[mod]
-                    loss_w += self.ot_dual_loss(self.A[mod], K[mod], self.GW[mod])
+                    loss_w += self.ot_dual_loss(A[mod], K[mod], self.GW[mod])
                 loss_w -= mdata.n_mod*self.rho_w*self.entropy_dual_loss(-htgw/(mdata.n_mod*self.rho_w))
                 self.losses_w.append(loss_w.detach())
                 loss_w.backward()
@@ -288,12 +288,3 @@ class OTintNMF():
         for mod in mdata.mod:
             mdata[mod].uns['H_OT'] = self.H[mod]
         mdata.obsm['W_OT'] = self.W.T
-
-    def variance_explained(self):
-        var_explained = {}
-        for mod in self.A:
-            var_explained[mod] = []
-            for i in range(self.latent_dim):
-                rec = self.H[mod][:,[i]] @ self.W[[i],:]
-                var_explained[mod].append(1 - ((rec.sum() - self.A[mod].sum())**2)/torch.sum(self.A[mod])**2)
-        return var_explained
