@@ -1,6 +1,9 @@
 # Single-cell multi-omics integration with Optimal Transport
 
-**Install package**: run `pip install git+ssh://git@github.com:gjhuizing/OT-scIntegration.git` or from this directory run `pip install .`
+**Install package**
+
+    git clone git@github.com:gjhuizing/OT-scIntegration.git
+    pip install ./OT-scIntegration/
 
 **Import package**: run `from scmiot import models, pl`
 
