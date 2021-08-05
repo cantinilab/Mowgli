@@ -7,7 +7,7 @@
 
 **Import package**
 
-    `from scmiot import models, pl`
+    from scmiot import models, pl
 
 **Conda environment**: `environment.yml` (in particular, relies on pytorch, scanpy and muon)
 
