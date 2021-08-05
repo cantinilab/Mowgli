@@ -158,7 +158,7 @@ class intNMF():
             self.losses[-1] += np.linalg.norm(A2 - self.H2@self.W)
 
 class OTintNMF():
-    def __init__(self, latent_dim=15, rho_h=1e-1, rho_w=1e-1, lr=1e-2, eps=5e-2, tol=1e-2, decay_rate=1):
+    def __init__(self, latent_dim=15, rho_h=1e-1, rho_w=1e-1, lr=1e-2, eps=5e-2, tol=1e-2):
         self.latent_dim = latent_dim
 
         self.lr = lr
@@ -168,8 +168,6 @@ class OTintNMF():
         self.eps = eps
 
         self.tol = tol
-
-        self.decay_rate = decay_rate
 
     def build_optimizer(self, params, lr):
         return optim.LBFGS(params, lr=lr, history_size=10, max_iter=4)
@@ -286,9 +284,6 @@ class OTintNMF():
 
             if len(self.losses_w) > 2 and abs(self.losses_w[-1] - self.losses_w[-2]) <= self.tol:
                 break
-
-            self.rho_h *= self.decay_rate
-            self.rho_w *= self.decay_rate
 
         for mod in mdata.mod:
             mdata[mod].uns['H_OT'] = self.H[mod]
