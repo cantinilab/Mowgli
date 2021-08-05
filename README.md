@@ -5,7 +5,9 @@
     git clone git@github.com:gjhuizing/OT-scIntegration.git
     pip install ./OT-scIntegration/
 
-**Import package**: run `from scmiot import models, pl`
+**Import package**
+
+    `from scmiot import models, pl`
 
 **Conda environment**: `environment.yml` (in particular, relies on pytorch, scanpy and muon)
 
