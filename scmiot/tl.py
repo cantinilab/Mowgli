@@ -57,7 +57,7 @@ def select_dimensions(mdata):
         s += np.array([(mdata[mod].uns['H_OT'][:,[k]] @ mdata.obsm['W_OT'].T[[k]]).std(1).sum() for k in range(latent_dim)])
 
     i = inflexion_pt(np.sort(s)[::-1])
-    i = max(i, 5)
+    i = max(i, 4)
     plt.plot(np.sort(s)[::-1])
     plt.scatter(range(latent_dim), np.sort(s)[::-1])
     plt.scatter(range(i+1), np.sort(s)[::-1][:i+1])
@@ -67,6 +67,8 @@ def select_dimensions(mdata):
 
 def trim_dimensions(mdata, dims):
     mdata.obsm['W_OT'] = mdata.obsm['W_OT'][:,dims]
+    for mod in mdata.mod:
+        mdata[mod].uns['H_OT'] = mdata[mod].uns['H_OT'][:,dims]
 
 def sil_score(mdata, obsm='W_OT', obs='leiden'):
     return silhouette_score(mdata.obsm[obsm], mdata.obs[obs])
@@ -91,19 +93,17 @@ def best_leiden_resolution(mdata, obsm='W_OT', method='elbow', resolution_range=
                 wss.append(joint_embedding.X[joint_embedding.obs['leiden'] == cat].std(0).sum())
             vars.append(np.mean(wss))
 
-        second_derivative = [-np.inf]
-        for i in range(1, len(vars)-1):
-            second_derivative.append(vars[i+1] + vars[i-1] - 2 * vars[i])
+        i = inflexion_pt(vars)
 
         plt.xscale('log')
         plt.scatter(resolution_range, vars)
-        plt.scatter(resolution_range[np.argmax(second_derivative)], vars[np.argmax(second_derivative)])
+        plt.scatter(resolution_range[i], vars[i])
         plt.plot(resolution_range, vars)
         plt.ylabel('Average intra-cluster variation')
         plt.xlabel('Resolution')
         plt.show()
 
-        return resolution_range[np.argmax(second_derivative)]
+        return resolution_range[i]
 
     elif method == 'silhouette':
         sils = []
