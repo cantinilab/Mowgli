@@ -25,6 +25,8 @@ import nn_fac.nnls
 # Progress bar
 from tqdm import tqdm
 
+import matplotlib.pyplot as plt
+
 class iNMF():
     def __init__(self, n_features_1: int, n_features_2: int,
                  n_cells: int, latent_dim: int, lbda: float = 5):
@@ -188,58 +190,15 @@ class OTintNMF():
         loss += (A*torch.log(K@torch.exp(G/self.eps))).sum()
         return self.eps*loss
 
-    def fit_transform(self, mdata, cost='cosine', n_iter_inner=25, n_iter=25, device='cpu'):
-        A, self.H, self.GH, self.GW, optimizer_h, K = {}, {}, {}, {}, {}, {}
-        self.losses_h = {}
-        self.losses_w = []
-
-        for mod in mdata.mod: # For each modality...
-
-            # ... Generate datasets
-            A[mod] = mdata[mod].X[:,mdata[mod].var['highly_variable'].to_numpy()]
-            try:
-                A[mod] = A[mod].todense()
-            except:
-                pass
-
-            # Normalize datasets
-            A[mod] = 1e-6 + A[mod].T
-            A[mod] /= A[mod].sum(0)
-
-            # Compute K
-            C = torch.from_numpy(cdist(A[mod], A[mod], metric=cost)).to(device=device, dtype=torch.float)
-            C /= C.max()
-            K[mod] = torch.exp(-C/self.eps)
-
-            # send to PyTorch
-            A[mod] = torch.from_numpy(A[mod]).to(device=device, dtype=torch.float)
-
-            # ... Generate H_i
-            n_vars = mdata[mod].var['highly_variable'].sum()
-            self.H[mod] = torch.rand(n_vars, self.latent_dim, device=device, dtype=torch.float)
-            self.H[mod] /= self.H[mod].sum(0)
-
-            # ... Generate G_{H_i}
-            self.GH[mod] = torch.rand(n_vars, mdata[mod].n_obs, requires_grad=True, device=device, dtype=torch.float)
-
-            # ... Generate G_{W_i}
-            self.GW[mod] = torch.rand(n_vars, mdata[mod].n_obs, requires_grad=True, device=device, dtype=torch.float)
-
-            # H optimizers
+    def optimize(self, modalities, n_iter_inner, n_iter, device, K):
+        optimizer_h, self.losses_h, self.losses_w  = {}, {}, []
+        for mod in modalities: # For each modality...
             optimizer_h[mod] = self.build_optimizer([self.GH[mod]], lr=self.lr)
-
-            # H losses
             self.losses_h[mod] = []
-
-        # Generate W
-        self.W = torch.rand(self.latent_dim, mdata.n_obs, device=device, dtype=torch.float)
-        self.W /= self.W.sum(0)
-
-        # W optimizers
-        optimizer_w = self.build_optimizer([self.GW[mod] for mod in mdata.mod], lr=self.lr)
+        optimizer_w = self.build_optimizer([self.GW[mod] for mod in modalities], lr=self.lr)
 
         # Progress bar
-        pbar = tqdm(total=n_iter_inner*2*mdata.n_mod*n_iter, position=0, leave=True)
+        pbar = tqdm(total=n_iter_inner*2*len(modalities)*n_iter, position=0, leave=True)
 
         # Losses
         loss_h = {}
@@ -247,10 +206,10 @@ class OTintNMF():
         # Main loop
         for k in range(n_iter):
             # Dual solver for H_i
-            for mod in mdata.mod:
+            for mod in modalities:
                 def closure():
                     optimizer_h[mod].zero_grad()
-                    loss_h[mod] = self.ot_dual_loss(A[mod], K[mod], self.GH[mod])
+                    loss_h[mod] = self.ot_dual_loss(self.A[mod], K[mod], self.GH[mod])
                     loss_h[mod] -= self.rho_h*self.entropy_dual_loss(-self.GH[mod]@self.W.T/self.rho_h)
                     self.losses_h[mod].append(loss_h[mod].detach())
                     loss_h[mod].backward()
@@ -266,24 +225,134 @@ class OTintNMF():
                 optimizer_w.zero_grad()
                 loss_w = 0
                 htgw = 0
-                for mod in mdata.mod:
+                for mod in modalities:
                     htgw += self.H[mod].T@self.GW[mod]
-                    loss_w += self.ot_dual_loss(A[mod], K[mod], self.GW[mod])
-                loss_w -= mdata.n_mod*self.rho_w*self.entropy_dual_loss(-htgw/(mdata.n_mod*self.rho_w))
+                    loss_w += self.ot_dual_loss(self.A[mod], K[mod], self.GW[mod])
+                loss_w -= len(modalities)*self.rho_w*self.entropy_dual_loss(-htgw/(len(modalities)*self.rho_w))
                 self.losses_w.append(loss_w.detach())
                 loss_w.backward()
                 return loss_w
             for _ in range(n_iter_inner):
                 optimizer_w.step(closure)
-                pbar.update(mdata.n_mod)
+                pbar.update(len(modalities))
 
             htgw = 0
-            for mod in mdata.mod:
+            for mod in modalities:
                 htgw += self.H[mod].T@self.GW[mod]
-            self.W = F.softmin(htgw/(mdata.n_mod*self.rho_w), dim=0).detach()
+            self.W = F.softmin(htgw/(len(modalities)*self.rho_w), dim=0).detach()
+
+            pbar.set_postfix(loss=self.losses_w[-1].cpu().numpy())
 
             if len(self.losses_w) > 2 and abs(self.losses_w[-1] - self.losses_w[-2]) <= self.tol:
                 break
+
+    def update_latent_dim(self, mdata, latent_dim, n_iter_inner=25, n_iter=25, device='cpu'):
+        assert(latent_dim > self.latent_dim)
+        self.latent_dim = latent_dim
+        K = {}
+        A_tilde = {}
+        H_old = {}
+        for mod in mdata.mod:
+            # Compute K
+            # ... Generate datasets
+            self.A[mod] = mdata[mod].X[:,mdata[mod].var['highly_variable'].to_numpy()]
+            try:
+                self.A[mod] = self.A[mod].todense()
+            except:
+                pass
+
+            # Normalize datasets
+            self.A[mod] = 1e-6 + self.A[mod].T
+            self.A[mod] /= self.A[mod].sum(0)
+
+            C = torch.from_numpy(cdist(self.A[mod], self.A[mod], metric=self.cost)).to(device=device, dtype=torch.float)
+            C /= C.max()
+            K[mod] = torch.exp(-C/self.eps)
+
+            self.A[mod] = torch.from_numpy(self.A[mod]).to(device=device, dtype=torch.float)
+
+            # Compute residual
+            A_tilde[mod] = self.A[mod] - self.H[mod] @ self.W
+            A_tilde[mod] = torch.abs(A_tilde[mod])
+            A_tilde[mod] = 1e-6 + A_tilde[mod]
+            A_tilde[mod] /= A_tilde[mod].sum(0)
+
+            # ... Generate H_i
+            H_old[mod] = 1.*self.H[mod]
+            self.H[mod] = torch.rand(self.H[mod].shape[0], self.latent_dim - self.H[mod].shape[1], device=device, dtype=torch.float)
+            self.H[mod] /= self.H[mod].sum(0)
+
+            # ... Generate G_{H_i}
+            self.GH[mod] = torch.rand(self.GH[mod].shape[0], mdata[mod].n_obs, requires_grad=True, device=device, dtype=torch.float)
+
+            # ... Generate G_{W_i}
+            self.GW[mod] = torch.rand(self.GW[mod].shape[0], mdata[mod].n_obs, requires_grad=True, device=device, dtype=torch.float)
+
+        # Generate W
+        W_old = 1.*self.W
+        self.W = torch.rand(self.latent_dim - self.W.shape[0], self.W.shape[1], device=device, dtype=torch.float)
+        self.W /= self.W.sum(0)
+
+        self.A = A_tilde
+
+        self.optimize(modalities=mdata.mod, n_iter_inner=n_iter_inner, n_iter=n_iter, device=device, K=K)
+
+        for mod in mdata.mod:
+            mdata[mod].uns['H_OT'] = torch.cat([H_old[mod], self.H[mod]], dim=1)
+        mdata.obsm['W_OT'] = torch.cat([W_old, self.W], dim=0).T
+
+    def plot_convergence(self):
+        plt.title('Dual losses for H')
+        for mod in self.H:
+            plt.plot(self.losses_h[mod])
+        plt.legend(self.H.keys())
+        plt.show()
+
+        plt.title('Dual loss for W')
+        plt.plot(self.losses_w)
+        plt.show()
+
+    def fit_transform(self, mdata, cost='cosine', n_iter_inner=25, n_iter=25, device='cpu'):
+        self.A, self.H, self.GH, self.GW, K = {}, {}, {}, {}, {}
+        self.cost = cost
+
+        for mod in mdata.mod: # For each modality...
+
+            # ... Generate datasets
+            self.A[mod] = mdata[mod].X[:,mdata[mod].var['highly_variable'].to_numpy()]
+            try:
+                self.A[mod] = self.A[mod].todense()
+            except:
+                pass
+
+            # Normalize datasets
+            self.A[mod] = 1e-6 + self.A[mod].T
+            self.A[mod] /= self.A[mod].sum(0)
+
+            # Compute K
+            C = torch.from_numpy(cdist(self.A[mod], self.A[mod], metric=self.cost)).to(device=device, dtype=torch.float)
+            C /= C.max()
+            K[mod] = torch.exp(-C/self.eps)
+
+            # send to PyTorch
+            self.A[mod] = torch.from_numpy(self.A[mod]).to(device=device, dtype=torch.float)
+
+            # ... Generate H_i
+            n_vars = mdata[mod].var['highly_variable'].sum()
+            self.H[mod] = torch.rand(n_vars, self.latent_dim, device=device, dtype=torch.float)
+            self.H[mod] /= self.H[mod].sum(0)
+
+            # ... Generate G_{H_i}
+            self.GH[mod] = torch.rand(n_vars, mdata[mod].n_obs, requires_grad=True, device=device, dtype=torch.float)
+
+            # ... Generate G_{W_i}
+            self.GW[mod] = torch.rand(n_vars, mdata[mod].n_obs, requires_grad=True, device=device, dtype=torch.float)
+
+        # Generate W
+        self.W = torch.rand(self.latent_dim, mdata.n_obs, device=device, dtype=torch.float)
+        self.W /= self.W.sum(0)
+
+        self.optimize(modalities=mdata.mod, n_iter_inner=n_iter_inner, n_iter=n_iter, device=device, K=K)
 
         for mod in mdata.mod:
             mdata[mod].uns['H_OT'] = self.H[mod]
