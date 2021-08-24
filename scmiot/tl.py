@@ -44,6 +44,30 @@ def leiden(mdata, n_neighbors=15, obsm='W_OT', resolution=1):
     sc.tl.leiden(joint_embedding, resolution=resolution)
     mdata.obs['leiden'] = joint_embedding.obs['leiden']
 
+def inflexion_pt(a):
+    second_derivative = [-np.inf]
+    for i in range(1, len(a) - 1):
+        second_derivative.append(a[i+1] + a[i-1] - 2 * a[i])
+    return np.argmax(second_derivative)
+
+def select_dimensions(mdata):
+    latent_dim = mdata.obsm['W_OT'].shape[1]
+    s = np.zeros(latent_dim)
+    for mod in mdata.mod:
+        s += np.array([(mdata[mod].uns['H_OT'][:,[k]] @ mdata.obsm['W_OT'].T[[k]]).std(1).sum() for k in range(latent_dim)])
+
+    i = inflexion_pt(np.sort(s)[::-1])
+    i = max(i, 5)
+    plt.plot(np.sort(s)[::-1])
+    plt.scatter(range(latent_dim), np.sort(s)[::-1])
+    plt.scatter(range(i+1), np.sort(s)[::-1][:i+1])
+    plt.plot(np.sort(s)[::-1][:i+1])
+    plt.show()
+    return np.argsort(s)[::-1][:i+1].copy()
+
+def trim_dimensions(mdata, dims):
+    mdata.obsm['W_OT'] = mdata.obsm['W_OT'][:,dims]
+
 def sil_score(mdata, obsm='W_OT', obs='leiden'):
     return silhouette_score(mdata.obsm[obsm], mdata.obs[obs])
 
@@ -67,7 +91,7 @@ def best_leiden_resolution(mdata, obsm='W_OT', method='elbow', resolution_range=
                 wss.append(joint_embedding.X[joint_embedding.obs['leiden'] == cat].std(0).sum())
             vars.append(np.mean(wss))
 
-        second_derivative = [0]
+        second_derivative = [-np.inf]
         for i in range(1, len(vars)-1):
             second_derivative.append(vars[i+1] + vars[i-1] - 2 * vars[i])
 
