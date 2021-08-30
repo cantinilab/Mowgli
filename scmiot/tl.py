@@ -50,7 +50,7 @@ def inflexion_pt(a):
         second_derivative.append(a[i+1] + a[i-1] - 2 * a[i])
     return np.argmax(second_derivative)
 
-def select_dimensions(mdata):
+def select_dimensions(mdata, plot=True):
     latent_dim = mdata.obsm['W_OT'].shape[1]
     s = np.zeros(latent_dim)
     for mod in mdata.mod:
@@ -58,11 +58,12 @@ def select_dimensions(mdata):
 
     i = inflexion_pt(np.sort(s)[::-1])
     i = max(i, 4)
-    plt.plot(np.sort(s)[::-1])
-    plt.scatter(range(latent_dim), np.sort(s)[::-1])
-    plt.scatter(range(i+1), np.sort(s)[::-1][:i+1])
-    plt.plot(np.sort(s)[::-1][:i+1])
-    plt.show()
+    if plot:
+        plt.plot(np.sort(s)[::-1])
+        plt.scatter(range(latent_dim), np.sort(s)[::-1])
+        plt.scatter(range(i+1), np.sort(s)[::-1][:i+1])
+        plt.plot(np.sort(s)[::-1][:i+1])
+        plt.show()
     return np.argsort(s)[::-1][:i+1].copy()
 
 def trim_dimensions(mdata, dims):
@@ -73,7 +74,7 @@ def trim_dimensions(mdata, dims):
 def sil_score(mdata, obsm='W_OT', obs='leiden'):
     return silhouette_score(mdata.obsm[obsm], mdata.obs[obs])
 
-def best_leiden_resolution(mdata, obsm='W_OT', method='elbow', resolution_range=None, n_neighbors=15):
+def best_leiden_resolution(mdata, obsm='W_OT', method='elbow', resolution_range=None, n_neighbors=15, plot=True):
     if resolution_range==None:
         resolution_range = 10.**np.linspace(-2, 1, 20)
 
@@ -94,14 +95,14 @@ def best_leiden_resolution(mdata, obsm='W_OT', method='elbow', resolution_range=
             vars.append(np.mean(wss))
 
         i = inflexion_pt(vars)
-
-        plt.xscale('log')
-        plt.scatter(resolution_range, vars)
-        plt.scatter(resolution_range[i], vars[i])
-        plt.plot(resolution_range, vars)
-        plt.ylabel('Average intra-cluster variation')
-        plt.xlabel('Resolution')
-        plt.show()
+        if plot:
+            plt.xscale('log')
+            plt.scatter(resolution_range, vars)
+            plt.scatter(resolution_range[i], vars[i])
+            plt.plot(resolution_range, vars)
+            plt.ylabel('Average intra-cluster variation')
+            plt.xlabel('Resolution')
+            plt.show()
 
         return resolution_range[i]
 
@@ -116,12 +117,13 @@ def best_leiden_resolution(mdata, obsm='W_OT', method='elbow', resolution_range=
             if sils[i] > sils[i+1] and sils[i] >= sils[i-1]:
                 maxes.append(i)
 
-        plt.xscale('log')
-        plt.scatter(resolution_range, sils)
-        plt.plot(resolution_range, sils)
-        plt.scatter([resolution_range[maxes[0]]], [sils[maxes[0]]])
-        plt.ylabel('Silhouette score')
-        plt.xlabel('Resolution')
-        plt.show()
+        if plot:
+            plt.xscale('log')
+            plt.scatter(resolution_range, sils)
+            plt.plot(resolution_range, sils)
+            plt.scatter([resolution_range[maxes[0]]], [sils[maxes[0]]])
+            plt.ylabel('Silhouette score')
+            plt.xlabel('Resolution')
+            plt.show()
 
         return resolution_range[maxes[0]]
