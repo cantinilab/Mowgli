@@ -20,9 +20,11 @@ def variance_explained(mdata, score_function='explained_variance_score', plot=Tr
     for mod in mdata.mod:
         score.append([])
         A = mdata.mod[mod].uns['H_OT'] @ mdata.obsm['W_OT'].T
+        A = A.cpu().numpy()
 
         for i in range(k):
             rec = mdata.mod[mod].uns['H_OT'][:,[i]] @ mdata.obsm['W_OT'][:,[i]].T
+            rec = rec.cpu().numpy()
             score[-1].append(f_score(A, rec))
 
     if plot:
