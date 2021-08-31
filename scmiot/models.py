@@ -246,7 +246,7 @@ class OTintNMF():
             if len(self.losses_w) > 2 and abs(self.losses_w[-1] - self.losses_w[-2]) <= self.tol:
                 break
 
-    def update_latent_dim(self, mdata, latent_dim, n_iter_inner=25, n_iter=25, device='cpu'):
+    def update_latent_dim(self, mdata, latent_dim, n_iter_inner=25, n_iter=25, device='cpu', dtype=torch.float):
         assert(latent_dim > self.latent_dim)
         self.latent_dim = latent_dim
         K = {}
@@ -265,11 +265,11 @@ class OTintNMF():
             self.A[mod] = 1e-6 + self.A[mod].T
             self.A[mod] /= self.A[mod].sum(0)
 
-            C = torch.from_numpy(cdist(self.A[mod], self.A[mod], metric=self.cost)).to(device=device, dtype=torch.float)
+            C = torch.from_numpy(cdist(self.A[mod], self.A[mod], metric=self.cost)).to(device=device, dtype=dtype)
             C /= C.max()
-            K[mod] = torch.exp(-C/self.eps)
+            K[mod] = torch.exp(-C/self.eps).to(device=device, dtype=dtype)
 
-            self.A[mod] = torch.from_numpy(self.A[mod]).to(device=device, dtype=torch.float)
+            self.A[mod] = torch.from_numpy(self.A[mod]).to(device=device, dtype=dtype)
 
             # Compute residual
             A_tilde[mod] = self.A[mod] - self.H[mod] @ self.W
@@ -279,18 +279,18 @@ class OTintNMF():
 
             # ... Generate H_i
             H_old[mod] = 1.*self.H[mod]
-            self.H[mod] = torch.rand(self.H[mod].shape[0], self.latent_dim - self.H[mod].shape[1], device=device, dtype=torch.float)
+            self.H[mod] = torch.rand(self.H[mod].shape[0], self.latent_dim - self.H[mod].shape[1], device=device, dtype=dtype)
             self.H[mod] /= self.H[mod].sum(0)
 
             # ... Generate G_{H_i}
-            self.GH[mod] = torch.rand(self.GH[mod].shape[0], mdata[mod].n_obs, requires_grad=True, device=device, dtype=torch.float)
+            self.GH[mod] = torch.rand(self.GH[mod].shape[0], mdata[mod].n_obs, requires_grad=True, device=device, dtype=dtype)
 
             # ... Generate G_{W_i}
-            self.GW[mod] = torch.rand(self.GW[mod].shape[0], mdata[mod].n_obs, requires_grad=True, device=device, dtype=torch.float)
+            self.GW[mod] = torch.rand(self.GW[mod].shape[0], mdata[mod].n_obs, requires_grad=True, device=device, dtype=dtype)
 
         # Generate W
         W_old = 1.*self.W
-        self.W = torch.rand(self.latent_dim - self.W.shape[0], self.W.shape[1], device=device, dtype=torch.float)
+        self.W = torch.rand(self.latent_dim - self.W.shape[0], self.W.shape[1], device=device, dtype=dtype)
         self.W /= self.W.sum(0)
 
         self.A = A_tilde
@@ -312,7 +312,7 @@ class OTintNMF():
         plt.plot(self.losses_w)
         plt.show()
 
-    def fit_transform(self, mdata, cost='cosine', n_iter_inner=25, n_iter=25, device='cpu'):
+    def fit_transform(self, mdata, cost='cosine', n_iter_inner=25, n_iter=25, device='cpu', dtype=torch.float):
         self.A, self.H, self.GH, self.GW, K = {}, {}, {}, {}, {}
         self.cost = cost
 
@@ -330,26 +330,26 @@ class OTintNMF():
             self.A[mod] /= self.A[mod].sum(0)
 
             # Compute K
-            C = torch.from_numpy(cdist(self.A[mod], self.A[mod], metric=self.cost)).to(device=device, dtype=torch.float)
+            C = torch.from_numpy(cdist(self.A[mod], self.A[mod], metric=self.cost)).to(device=device, dtype=dtype)
             C /= C.max()
-            K[mod] = torch.exp(-C/self.eps)
+            K[mod] = torch.exp(-C/self.eps).to(device=device, dtype=dtype)
 
             # send to PyTorch
-            self.A[mod] = torch.from_numpy(self.A[mod]).to(device=device, dtype=torch.float)
+            self.A[mod] = torch.from_numpy(self.A[mod]).to(device=device, dtype=dtype)
 
             # ... Generate H_i
             n_vars = mdata[mod].var['highly_variable'].sum()
-            self.H[mod] = torch.rand(n_vars, self.latent_dim, device=device, dtype=torch.float)
+            self.H[mod] = torch.rand(n_vars, self.latent_dim, device=device, dtype=dtype)
             self.H[mod] /= self.H[mod].sum(0)
 
             # ... Generate G_{H_i}
-            self.GH[mod] = torch.rand(n_vars, mdata[mod].n_obs, requires_grad=True, device=device, dtype=torch.float)
+            self.GH[mod] = torch.rand(n_vars, mdata[mod].n_obs, requires_grad=True, device=device, dtype=dtype)
 
             # ... Generate G_{W_i}
-            self.GW[mod] = torch.rand(n_vars, mdata[mod].n_obs, requires_grad=True, device=device, dtype=torch.float)
+            self.GW[mod] = torch.rand(n_vars, mdata[mod].n_obs, requires_grad=True, device=device, dtype=dtype)
 
         # Generate W
-        self.W = torch.rand(self.latent_dim, mdata.n_obs, device=device, dtype=torch.float)
+        self.W = torch.rand(self.latent_dim, mdata.n_obs, device=device, dtype=dtype)
         self.W /= self.W.sum(0)
 
         self.optimize(modalities=mdata.mod, n_iter_inner=n_iter_inner, n_iter=n_iter, device=device, K=K)
