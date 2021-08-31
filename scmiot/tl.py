@@ -112,7 +112,10 @@ def best_leiden_resolution(mdata, obsm='W_OT', method='elbow', resolution_range=
         sils = []
         for res in resolution_range:
             sc.tl.leiden(joint_embedding, resolution=res)
-            sils.append(silhouette_score(joint_embedding.X, joint_embedding.obs['leiden']))
+            try:
+                sils.append(silhouette_score(joint_embedding.X, joint_embedding.obs['leiden']))
+            except:
+                sils.append(-1)
 
         maxes = []
         for i in range(1, len(sils)-1):
