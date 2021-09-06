@@ -136,6 +136,8 @@ class OTintNMF():
     def fit_transform(self, mdata, cost='cosine', n_iter_inner=25, n_iter=25, device='cpu', dtype=torch.float):
         self.A, self.H, self.GH, self.GW, K = {}, {}, {}, {}, {}
         self.cost = cost
+        if isinstance(self.cost, str):
+            self.cost = {mod:self.cost for mod in mdata.mod}
 
         for mod in mdata.mod: # For each modality...
 
@@ -151,7 +153,7 @@ class OTintNMF():
             self.A[mod] /= self.A[mod].sum(0)
 
             # Compute K
-            C = torch.from_numpy(cdist(self.A[mod], self.A[mod], metric=self.cost)).to(device=device, dtype=dtype)
+            C = torch.from_numpy(cdist(self.A[mod], self.A[mod], metric=self.cost[mod])).to(device=device, dtype=dtype)
             C /= C.max()
             K[mod] = torch.exp(-C/self.eps).to(device=device, dtype=dtype)
 
