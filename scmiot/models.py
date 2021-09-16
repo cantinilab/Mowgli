@@ -44,20 +44,6 @@ class OTintNMF():
     cost : str or Dict
         Name of function to compute the ground cost.
 
-    Attributes
-    ----------
-    latent_dim
-    rho_h
-    rho_w
-    eps
-    losses_w
-    losses_h
-    losses
-    cost
-    A
-    H
-    G
-    K
     """
     def __init__(self, latent_dim: int = 15, rho_h: float = 1e-1,
                  rho_w: float = 1e-1, eps: float = 5e-2, cost='correlation'):
@@ -99,15 +85,14 @@ class OTintNMF():
         # return optim.Adam(params, lr=lr)
 
     def entropy(self, X: torch.Tensor, min_one: bool = False) -> torch.Tensor:
-        """Entropy function, $E(X) = \langle X, \log X - 1\rangle$.
-        The 1 is optional.
+        """Entropy function, :math:`E(X) = \langle X, \log X - 1 \rangle`.
 
         Parameters
         ----------
         X : torch.Tensor
             The parameter to compute the entropy of.
         min_one : bool
-            Whether to inclue the $-1$ in the formula.
+            Whether to inclue the :math:`-1` in the formula.
 
         Returns
         -------
@@ -147,7 +132,7 @@ class OTintNMF():
         A : torch.Tensor
             The reference dataset
         K : torch.Tensor
-            The exponentiated ground cost $K=e^{-C/\epsilon}$
+            The exponentiated ground cost :math:`K=e^{-C/\epsilon}`
         Y : torch.Tensor
             The dual parameter
 
