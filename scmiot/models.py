@@ -64,7 +64,7 @@ class OTintNMF():
         self.losses_w, self.losses_h, self.losses = [], [], []
         self.A, self.H, self.G, self.K = {}, {}, {}, {}
 
-    def build_optimizer(self, params, lr: float) -> torch.optim.Optimizer:
+    def build_optimizer(self, params, lr: float, optim_name: str) -> torch.optim.Optimizer:
         """Generates the optimizer
 
         Parameters
@@ -80,9 +80,12 @@ class OTintNMF():
             An optimizer
 
         """
-        return optim.LBFGS(params, lr=lr, history_size=10, max_iter=4)
-        # return optim.SGD(params, lr=lr)
-        # return optim.Adam(params, lr=lr)
+        if optim_name == 'lbfgs':
+            return optim.LBFGS(params, lr=lr, history_size=5, max_iter=1, line_search_fn='strong_wolfe')
+        elif optim_name == 'sgd':
+            return optim.SGD(params, lr=lr)
+        elif optim_name == 'adam':
+            return optim.Adam(params, lr=lr)
 
     def entropy(self, X: torch.Tensor, min_one: bool = False) -> torch.Tensor:
         """Entropy function, :math:`E(X) = \langle X, \log X - 1 \rangle`.
@@ -312,7 +315,7 @@ class OTintNMF():
     def fit_transform(self, mdata: mu.MuData, max_iter_inner: int = 25,
         max_iter: int = 25, device: torch.device = 'cpu', lr: float = 1e-2,
         dtype: torch.dtype = torch.float, tol_inner: float = 1e-5,
-        tol_outer: float = 1e-3) -> None:
+        tol_outer: float = 1e-3, optim_name: str = "lbfgs") -> None:
         """Fit the model to the input multiomics dataset, and add the learned
         factors to the Muon object.
 
@@ -344,7 +347,7 @@ class OTintNMF():
 
         # Building the optimizer
         optimizer = self.build_optimizer(
-            [self.G[mod] for mod in mdata.mod], lr=lr)
+            [self.G[mod] for mod in mdata.mod], lr=lr, optim_name=optim_name)
 
         # Progress bar
         pbar = tqdm(total=2*max_iter, position=0, leave=True)
