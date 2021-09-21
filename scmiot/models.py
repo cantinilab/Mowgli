@@ -144,8 +144,8 @@ class OTintNMF():
         torch.Tensor
             The dual optimal transport loss of Y.
         """
-        loss = self.entropy(A, min_one=True)
-        loss += torch.sum(A*torch.log(K@torch.exp(Y/self.eps)))
+        # loss = self.entropy(A, min_one=True)
+        loss = torch.sum(A*torch.log(K@torch.exp(Y/self.eps)))
         return self.eps*loss
 
     def early_stop(self, history: List, tol: float) -> bool:
@@ -184,7 +184,7 @@ class OTintNMF():
             loss += ((self.H[mod] @ self.W) * self.G[mod]).sum()
             loss -= self.rho_w*self.entropy(self.W)
             loss -= self.rho_h*self.entropy(self.H[mod])
-        return loss.detach()/len(self.A.keys())
+        return loss.detach()
 
     def optimize(self, optimizer: torch.optim.Optimizer, loss_fn: Callable,
                  max_iter: int, history: List, tol: float) -> None:
@@ -288,8 +288,8 @@ class OTintNMF():
             loss_h += self.ot_dual_loss(
                 self.A[mod], self.K[mod], self.G[mod])
             # Entropy dual loss term
-            loss_h -= self.rho_h*self.entropy_dual_loss(
-                -self.G[mod]@self.W.T/self.rho_h)
+            coef = self.rho_h
+            loss_h -= coef*self.entropy_dual_loss(-self.G[mod]@self.W.T/coef)
         return loss_h
 
     def loss_fn_w(self) -> torch.Tensor:
@@ -308,8 +308,8 @@ class OTintNMF():
             htgw += self.H[mod].T@self.G[mod]
             loss_w += self.ot_dual_loss(
                 self.A[mod], self.K[mod], self.G[mod])
-        loss_w -= len(modalities)*self.rho_w*self.entropy_dual_loss(
-            -htgw/(self.rho_w*len(modalities)))
+        coef = len(modalities)*self.rho_w
+        loss_w -= coef*self.entropy_dual_loss(-htgw/coef)
         return loss_w
 
     def fit_transform(self, mdata: mu.MuData, max_iter_inner: int = 25,
@@ -360,8 +360,9 @@ class OTintNMF():
                 max_iter=max_iter_inner, history=self.losses_h, tol=tol_inner)
             # Update H
             for mod in mdata.mod:
+                coef = self.rho_h
                 self.H[mod] = F.softmin(
-                    self.G[mod]@self.W.T/self.rho_h, dim=0).detach()
+                    self.G[mod]@self.W.T/coef, dim=0).detach()
             # Update progress bar
             pbar.update(1)
 
