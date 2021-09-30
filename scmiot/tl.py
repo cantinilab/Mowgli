@@ -5,6 +5,8 @@ import anndata as ad
 from sklearn.metrics import r2_score, explained_variance_score, silhouette_score
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.spatial.distance import cdist
+from tqdm.notebook import tqdm
 
 def variance_explained(mdata, score_function='explained_variance_score', plot=True):
     """experimental, i have to test this function"""
@@ -75,6 +77,14 @@ def trim_dimensions(mdata, dims):
 
 def sil_score(mdata, obsm='W_OT', obs='leiden'):
     return silhouette_score(mdata.obsm[obsm], mdata.obs[obs])
+
+def knn_score(mdata, obs, obsm='W_OT', max_neighbors=15):
+    distances = cdist(mdata.obsm[obsm], mdata.obsm[obsm])
+    s = 0
+    for i in tqdm(range(mdata.n_obs)):
+        idx = distances[i].argsort()[1:max_neighbors]
+        s += np.cumsum(np.array(mdata.obs[obs][i] == mdata.obs[obs][idx]))/np.arange(1, max_neighbors)
+    return s / mdata.n_obs
 
 def best_leiden_resolution(mdata, obsm='W_OT', method='elbow', resolution_range=None, n_neighbors=15, plot=True):
     if resolution_range==None:
