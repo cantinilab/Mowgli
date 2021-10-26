@@ -12,12 +12,12 @@
 #
 import os
 import sys
-sys.path.insert(0, os.path.abspath('..'))
+sys.path.insert(0, os.path.abspath('../../scmiot'))
 
 
 # -- Project information -----------------------------------------------------
 
-project = 'Single Cell Multi Omics Integration with Optimal Tansport'
+project = 'scmiot'
 copyright = '2021, Geert-Jan Huizing, Gabriel Peyré, Laura Cantini'
 author = 'Geert-Jan Huizing, Gabriel Peyré, Laura Cantini'
 
@@ -28,11 +28,9 @@ author = 'Geert-Jan Huizing, Gabriel Peyré, Laura Cantini'
 # extensions coming with Sphinx (named 'sphinx.ext.*') or your custom
 # ones.
 extensions = [
-    'sphinx.ext.githubpages',
-    'myst_parser',
     'sphinx.ext.autodoc',
-    'sphinx.ext.coverage',
-    'sphinx.ext.napoleon'
+    'sphinx.ext.napoleon',
+    'nbsphinx'
 ]
 
 # Add any paths that contain templates here, relative to this directory.
@@ -41,7 +39,7 @@ templates_path = ['_templates']
 # List of patterns, relative to source directory, that match files and
 # directories to ignore when looking for source files.
 # This pattern also affects html_static_path and html_extra_path.
-exclude_patterns = ['_build', 'Thumbs.db', '.DS_Store']
+exclude_patterns = []
 
 
 # -- Options for HTML output -------------------------------------------------

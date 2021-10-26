@@ -21,19 +21,17 @@ import matplotlib.pyplot as plt
 
 class OTintNMF():
     """Integrative Nonnegative Matrix Factorization with an Optimal Transport loss.
+
+    Args:
+        latent_dim (int, optional): Dimension of latent space. Defaults to 15.
+        rho_h (float, optional): Entropic regularization parameter for :math:`H`. Defaults to 1e-1.
+        rho_w (float, optional): Entropic regularization parameter for :math:`W`. Defaults to 1e-1.
+        eps (float, optional): Entropic regularization parameter for the optimal transport loss. Defaults to 5e-2.
+        cost (str, optional): Distance function compatible with `scipy.spatial.distance.cdist`, used to compute an empirical cost between features. If a dictionary is passed, different functions can be used for each modality. Defaults to 'correlation'.
+        pca (bool, optional): If `True`, the cost is computed on a PCA embedding of the features, of size `latent_dim`. Defaults to False.
     """
     def __init__(self, latent_dim: int = 15, rho_h: float = 1e-1, rho_w: float = 1e-1,
                  eps: float = 5e-2, cost: str = 'correlation', pca: bool = False):
-        """Integrative Nonnegative Matrix Factorization with an Optimal Transport loss.
-
-        Args:
-            latent_dim (int, optional): Dimension of latent space. Defaults to 15.
-            rho_h (float, optional): Entropic regularization parameter for :math:`H`. Defaults to 1e-1.
-            rho_w (float, optional): Entropic regularization parameter for :math:`W`. Defaults to 1e-1.
-            eps (float, optional): Entropic regularization parameter for the optimal transport loss. Defaults to 5e-2.
-            cost (str, optional): Distance function compatible with `scipy.spatial.distance.cdist`, used to compute an empirical cost between features. If a dictionary is passed, different functions can be used for each modality. Defaults to 'correlation'.
-            pca (bool, optional): If `True`, the cost is computed on a PCA embedding of the features, of size `latent_dim`. Defaults to False.
-        """
 
         # Check the user-defined parameters
         assert(latent_dim > 0)
