@@ -1,8 +1,6 @@
 # PyTorch
 import torch
-from torch.utils.data import DataLoader
 from torch import nn, optim
-from torch.autograd import Variable
 import torch.nn.functional as F
 from sklearn.decomposition import PCA
 
@@ -13,12 +11,7 @@ from scipy.spatial.distance import cdist
 from typing import List, Set, Dict, Tuple, Optional
 from typing import Callable, Iterator, Union, Optional, List
 
-# Numpy
-import numpy as np
-
 # Biology
-import scanpy as sc
-import anndata as ad
 import muon as mu
 
 # Progress bar
@@ -27,31 +20,28 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 
 class OTintNMF():
-    """Optimal Transport Nonnegative Matrix Factorization model
-
-    Parameters
-    ----------
-    latent_dim : int
-        Number of latent dimensions.
-    rho_h : float
-        Regularization parameter of the entropic positivity term on H
-    rho_w : float
-        Regularization parameter of the entropic positivity term on W
-    eps : float
-        Entropic regularization parameter for the Optimal Transport distance.
-    cost : str or Dict
-        Name of function to compute the ground cost.
-
+    """Integrative Nonnegative Matrix Factorization with an Optimal Transport loss.
     """
-    def __init__(self, latent_dim: int = 15, rho_h: float = 1e-1,
-                 rho_w: float = 1e-1, eps: float = 5e-2, cost='correlation', pca=False):
+    def __init__(self, latent_dim: int = 15, rho_h: float = 1e-1, rho_w: float = 1e-1,
+                 eps: float = 5e-2, cost: str = 'correlation', pca: bool = False):
+        """Integrative Nonnegative Matrix Factorization with an Optimal Transport loss.
+
+        Args:
+            latent_dim (int, optional): Dimension of latent space. Defaults to 15.
+            rho_h (float, optional): Entropic regularization parameter for :math:`H`. Defaults to 1e-1.
+            rho_w (float, optional): Entropic regularization parameter for :math:`W`. Defaults to 1e-1.
+            eps (float, optional): Entropic regularization parameter for the optimal transport loss. Defaults to 5e-2.
+            cost (str, optional): Distance function compatible with `scipy.spatial.distance.cdist`, used to compute an empirical cost between features. If a dictionary is passed, different functions can be used for each modality. Defaults to 'correlation'.
+            pca (bool, optional): If `True`, the cost is computed on a PCA embedding of the features, of size `latent_dim`. Defaults to False.
+        """
+
         # Check the user-defined parameters
         assert(latent_dim > 0)
         assert(rho_h > 0)
         assert(rho_w > 0)
         assert(eps > 0)
 
-        # Save as attributes
+        # Save args as attributes
         self.latent_dim = latent_dim
         self.rho_h = rho_h
         self.rho_w = rho_w
@@ -59,185 +49,18 @@ class OTintNMF():
         self.cost = cost
         self.pca = pca
 
-        # Other attributes
+        # Init other attributes
         self.losses_w, self.losses_h, self.losses = [], [], []
         self.A, self.H, self.G, self.K = {}, {}, {}, {}
 
-    def build_optimizer(self, params, lr: float, optim_name: str) -> torch.optim.Optimizer:
-        """Generates the optimizer
-
-        Parameters
-        ----------
-        params
-            parameters
-        lr : float
-            Learning rate
-
-        Returns
-        -------
-        torch.optim.Optimizer
-            An optimizer
-
-        """
-        if optim_name == 'lbfgs':
-            return optim.LBFGS(params, lr=lr, history_size=5, max_iter=1, line_search_fn='strong_wolfe')
-        elif optim_name == 'sgd':
-            return optim.SGD(params, lr=lr)
-        elif optim_name == 'adam':
-            return optim.Adam(params, lr=lr)
-
-    def entropy(self, X: torch.Tensor, min_one: bool = False) -> torch.Tensor:
-        """Entropy function, :math:`E(X) = \langle X, \log X - 1 \rangle`.
-
-        Parameters
-        ----------
-        X : torch.Tensor
-            The parameter to compute the entropy of.
-        min_one : bool
-            Whether to inclue the :math:`-1` in the formula.
-
-        Returns
-        -------
-        torch.Tensor
-            The entropy of X.
-
-        """
-        if min_one:
-            return -torch.nan_to_num(X*(X.log()-1)).sum()
-        else:
-            return -torch.nan_to_num(X*X.log()).sum()
-
-    def entropy_dual_loss(self, Y: torch.Tensor) -> torch.Tensor:
-        """The dual of the entropy function.
-        Implies a simplex constraint for the entropy,
-        and no -1 in its expression!
-
-        Parameters
-        ----------
-        Y : torch.Tensor
-            The dual parameter.
-
-        Returns
-        -------
-        torch.Tensor
-            The dual entropy loss of Y
-
-        """
-        return -torch.logsumexp(Y, dim=0).sum()
-
-    def ot_dual_loss(self, A: torch.Tensor, K: torch.Tensor,
-                     Y: torch.Tensor) -> torch.Tensor:
-        """The dual optimal transport loss.
-
-        Parameters
-        ----------
-        A : torch.Tensor
-            The reference dataset
-        K : torch.Tensor
-            The exponentiated ground cost :math:`K=e^{-C/\epsilon}`
-        Y : torch.Tensor
-            The dual parameter
-
-        Returns
-        -------
-        torch.Tensor
-            The dual optimal transport loss of Y.
-        """
-        # loss = self.entropy(A, min_one=True)
-        loss = torch.sum(A*torch.log(K@torch.exp(Y/self.eps)))
-        return self.eps*loss
-
-    def early_stop(self, history: List, tol: float) -> bool:
-        """Check if the early stopping criterion is valid
-
-        Parameters
-        ----------
-        history : List
-            The history of values to check.
-        tol : float
-            Tolerance of the value.
-
-        Returns
-        -------
-        bool
-            Whether one can stop early
-
-        """
-        if len(history) > 2 and abs(history[-1] - history[-2]) < tol:
-            return True
-        else:
-            return False
-
-    def total_dual_loss(self) -> torch.Tensor:
-        """Compute total dual loss
-
-        Returns
-        -------
-        torch.Tensor
-            The loss
-
-        """
-        loss = 0
-        for mod in self.A:
-            loss -= self.ot_dual_loss(self.A[mod], self.K[mod], self.G[mod])
-            loss += ((self.H[mod] @ self.W) * self.G[mod]).sum()
-            loss -= self.rho_w*self.entropy(self.W)
-            loss -= self.rho_h*self.entropy(self.H[mod])
-        return loss.detach()
-
-    def optimize(self, optimizer: torch.optim.Optimizer, loss_fn: Callable,
-                 max_iter: int, history: List, tol: float, pbar: None) -> None:
-        """Optimize the dual variable based on the provided loss function
-
-        Parameters
-        ----------
-        optimizer : torch.optim.Optimizer
-            Optimizer used
-        loss_fn : Callable
-            Loss function to optimize
-        max_iter : int
-            Max number of iterations
-        history : List
-            List to update with the values of the loss
-        tol : float
-            Tolerance for the convergence
-
-        """
-
-        if len(self.losses) > 0:
-            total_loss = self.losses[-1].cpu().numpy()
-        else:
-            total_loss = '?'
-
-        for i in range(max_iter):
-
-            def closure():
-                optimizer.zero_grad()
-                loss = loss_fn()
-                loss.backward()
-                return loss
-
-            history.append(closure().detach())
-            optimizer.step(closure)
-
-            if i % 10 == 0:
-                pbar.set_postfix({
-                    'loss': total_loss,
-                    'loss_inner': history[-1].cpu().numpy()
-                })
-
-            if self.early_stop(history, tol):
-                break
-
     def init_parameters(self, mdata: mu.MuData, dtype: torch.dtype,
         device: torch.device) -> None:
-        """Init parameters before optimization
+        """Initialize parameters before optimization
 
-        Parameters
-        ----------
-        mdata : mu.MuData
-            Input dataset
-
+        Args:
+            mdata (mu.MuData): Input dataset
+            dtype (torch.dtype): Data type (e.g. double)
+            device (torch.device): Device (e.g. cuda)
         """
 
         # For each modality
@@ -287,46 +110,6 @@ class OTintNMF():
             self.latent_dim, mdata.n_obs, device=device, dtype=dtype)
         self.W /= self.W.sum(0)
 
-    def loss_fn_h(self) -> torch.Tensor:
-        """Return the loss for the optimization of H
-
-        Returns
-        -------
-        torch.Tensor
-            The loss
-
-        """
-        loss_h = 0
-        modalities = self.A.keys()
-        for mod in modalities:
-            # OT dual loss term
-            loss_h += self.ot_dual_loss(
-                self.A[mod], self.K[mod], self.G[mod])
-            # Entropy dual loss term
-            coef = self.rho_h
-            loss_h -= coef*self.entropy_dual_loss(-self.G[mod]@self.W.T/coef)
-        return loss_h
-
-    def loss_fn_w(self) -> torch.Tensor:
-        """Return the loss for the optimization of W
-
-        Returns
-        -------
-        torch.Tensor
-            The loss
-
-        """
-        loss_w = 0
-        htgw = 0
-        modalities = self.A.keys()
-        for mod in modalities:
-            htgw += self.H[mod].T@self.G[mod]
-            loss_w += self.ot_dual_loss(
-                self.A[mod], self.K[mod], self.G[mod])
-        coef = len(modalities)*self.rho_w
-        loss_w -= coef*self.entropy_dual_loss(-htgw/coef)
-        return loss_w
-
     def fit_transform(self, mdata: mu.MuData, max_iter_inner: int = 25,
         max_iter: int = 25, device: torch.device = 'cpu', lr: float = 1e-2,
         dtype: torch.dtype = torch.float, tol_inner: float = 1e-5,
@@ -334,26 +117,16 @@ class OTintNMF():
         """Fit the model to the input multiomics dataset, and add the learned
         factors to the Muon object.
 
-        Parameters
-        ----------
-        mdata : mu.MuData
-            Input dataset
-        max_iter_inner : int
-            Maximum number of iterations for the inner loop
-        max_iter : int
-            Maximum number of iterations for the outer loop
-        device : torch.device
-            Device to do computations on
-        lr : float
-            Learning rate
-        dtype : torch.dtype
-            Dtype of tensors
-        tol_inner : float
-            Tolerance for the inner loop convergence
-        tol_outer : float
-            Tolerance for the outer loop convergence (more tolerance is
-            advised in the outer loop)
-
+        Args:
+            mdata (mu.MuData): Input dataset
+            max_iter_inner (int, optional): Maximum number of iterations for the inner loop. Defaults to 25.
+            max_iter (int, optional): Maximum number of iterations for the outer loop. Defaults to 25.
+            device (torch.device, optional): Device to do computations on. Defaults to 'cpu'.
+            lr (float, optional): Learning rate. Defaults to 1e-2.
+            dtype (torch.dtype, optional): Dtype of tensors. Defaults to torch.float.
+            tol_inner (float, optional): Tolerance for the inner loop convergence. Defaults to 1e-5.
+            tol_outer (float, optional): Tolerance for the outer loop convergence (more tolerance is advised in the outer loop). Defaults to 1e-3.
+            optim_name (str, optional): Name of optimizer. See `build_optimizer`. Defaults to "lbfgs".
         """
 
         # Initialization
@@ -406,3 +179,165 @@ class OTintNMF():
         for mod in mdata.mod:
             mdata[mod].uns['H_OT'] = self.H[mod]
         mdata.obsm['W_OT'] = self.W.T
+
+    def build_optimizer(self, params, lr: float, optim_name: str) -> torch.optim.Optimizer:
+        """Generates the optimizer
+
+        Args:
+            params (Iterable of Tensors): The parameters to be optimized
+            lr (float): Learning rate of the optimizer
+            optim_name (str): Name of the optimizer, among `'lbfgs'`, `'sgd'`, `'adam'`
+
+        Returns:
+            torch.optim.Optimizer: The optimizer
+        """
+        if optim_name == 'lbfgs':
+            return optim.LBFGS(params, lr=lr, history_size=5, max_iter=1, line_search_fn='strong_wolfe')
+        elif optim_name == 'sgd':
+            return optim.SGD(params, lr=lr)
+        elif optim_name == 'adam':
+            return optim.Adam(params, lr=lr)
+
+    def optimize(self, optimizer: torch.optim.Optimizer, loss_fn: Callable,
+                 max_iter: int, history: List, tol: float, pbar: None) -> None:
+        """Optimize the dual variable based on the provided loss function
+
+        Args:
+            optimizer (torch.optim.Optimizer): Optimizer used
+            loss_fn (Callable): Loss function to optimize
+            max_iter (int): Max number of iterations
+            history (List): List to update with the values of the loss
+            tol (float): Tolerance for the convergence
+            pbar (None): `tqdm` progress bar
+        """
+        if len(self.losses) > 0:
+            total_loss = self.losses[-1].cpu().numpy()
+        else:
+            total_loss = '?'
+
+        for i in range(max_iter):
+
+            def closure():
+                optimizer.zero_grad()
+                loss = loss_fn()
+                loss.backward()
+                return loss
+
+            history.append(closure().detach())
+            optimizer.step(closure)
+
+            if i % 10 == 0:
+                pbar.set_postfix({
+                    'loss': total_loss,
+                    'loss_inner': history[-1].cpu().numpy()
+                })
+
+            if self.early_stop(history, tol):
+                break
+    
+    def early_stop(self, history: List, tol: float) -> bool:
+        """Check if the early soptting criterion is valid
+
+        Args:
+            history (List): The history of values to check.
+            tol (float): Tolerance of the value.
+
+        Returns:
+            bool: Whether one can stop early
+        """
+        if len(history) > 2 and abs(history[-1] - history[-2]) < tol:
+            return True
+        else:
+            return False
+
+    def entropy(self, X: torch.Tensor, min_one: bool = False) -> torch.Tensor:
+        """Entropy function, :math:`E(X) = \langle X, \log X - 1 \rangle`.
+
+        Args:
+            X (torch.Tensor): The parameter to compute the entropy of.
+            min_one (bool, optional): Whether to inclue the :math:`-1` in the formula.. Defaults to False.
+
+        Returns:
+            torch.Tensor:  The entropy of X.
+        """
+        if min_one:
+            return -torch.nan_to_num(X*(X.log()-1)).sum()
+        else:
+            return -torch.nan_to_num(X*X.log()).sum()
+
+    def entropy_dual_loss(self, Y: torch.Tensor) -> torch.Tensor:
+        """The dual of the entropy function.
+        
+        Implies a simplex constraint for the entropy,
+        and no -1 in its expression!
+
+        Args:
+            Y (torch.Tensor): The dual parameter.
+
+        Returns:
+            torch.Tensor: The dual entropy loss of Y
+        """
+        return -torch.logsumexp(Y, dim=0).sum()
+
+    def ot_dual_loss(self, A: torch.Tensor, K: torch.Tensor,
+                     Y: torch.Tensor) -> torch.Tensor:
+        """The dual optimal transport loss. We omit the constant entropy term.
+
+        Args:
+            A (torch.Tensor): The reference dataset
+            K (torch.Tensor): The exponentiated ground cost :math:`K=e^{-C/\epsilon}`
+            Y (torch.Tensor): The dual parameter
+
+        Returns:
+            torch.Tensor: The dual optimal transport loss of Y.
+        """
+        loss = torch.sum(A*torch.log(K@torch.exp(Y/self.eps)))
+        return self.eps*loss
+
+    def total_dual_loss(self) -> torch.Tensor:
+        """Compute total dual loss
+
+        Returns:
+            torch.Tensor: The loss
+        """
+        loss = 0
+        for mod in self.A:
+            loss -= self.ot_dual_loss(self.A[mod], self.K[mod], self.G[mod])
+            loss += ((self.H[mod] @ self.W) * self.G[mod]).sum()
+            loss -= self.rho_w*self.entropy(self.W)
+            loss -= self.rho_h*self.entropy(self.H[mod])
+        return loss.detach()
+    
+    def loss_fn_h(self) -> torch.Tensor:
+        """The loss for the optimization of :math:`H`
+
+        Returns:
+            torch.Tensor: The loss
+        """
+        loss_h = 0
+        modalities = self.A.keys()
+        for mod in modalities:
+            # OT dual loss term
+            loss_h += self.ot_dual_loss(
+                self.A[mod], self.K[mod], self.G[mod])
+            # Entropy dual loss term
+            coef = self.rho_h
+            loss_h -= coef*self.entropy_dual_loss(-self.G[mod]@self.W.T/coef)
+        return loss_h
+
+    def loss_fn_w(self) -> torch.Tensor:
+        """Return the loss for the optimization of W
+
+        Returns:
+            torch.Tensor: The loss
+        """
+        loss_w = 0
+        htgw = 0
+        modalities = self.A.keys()
+        for mod in modalities:
+            htgw += self.H[mod].T@self.G[mod]
+            loss_w += self.ot_dual_loss(
+                self.A[mod], self.K[mod], self.G[mod])
+        coef = len(modalities)*self.rho_w
+        loss_w -= coef*self.entropy_dual_loss(-htgw/coef)
+        return loss_w
