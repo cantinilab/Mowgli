@@ -177,8 +177,8 @@ class OTintNMF():
 
         # Add H and W to mdata
         for mod in mdata.mod:
-            mdata[mod].uns['H_OT'] = self.H[mod]
-        mdata.obsm['W_OT'] = self.W.T
+            mdata[mod].uns['H_OT'] = self.H[mod].cpu().numpy()
+        mdata.obsm['W_OT'] = self.W.T.cpu().numpy()
 
     def build_optimizer(self, params, lr: float, optim_name: str) -> torch.optim.Optimizer:
         """Generates the optimizer
