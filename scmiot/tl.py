@@ -7,6 +7,9 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy.spatial.distance import cdist
 from tqdm.notebook import tqdm
+from sklearn.metrics import adjusted_rand_score as ARI
+from sklearn.metrics import normalized_mutual_info_score as NMI
+from scipy.stats import pearsonr, spearmanr
 
 def variance_explained(mdata, score_function='explained_variance_score', plot=True):
     """experimental, i have to test this function"""
@@ -42,8 +45,44 @@ def variance_explained(mdata, score_function='explained_variance_score', plot=Tr
         plt.show()
     return score
 
+def leiden_multi(mdata, n_neighbors=15, obsm='W_OT', obs='rna:celltype', resolutions=10.**np.linspace(-2, 1, 20)):
+    try:
+        joint_embedding = ad.AnnData(mdata.obsm[obsm].cpu().numpy(), obs=mdata.obs)
+    except:
+        joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
+    aris = []
+    nmis = []
+    sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors)
+    for resolution in tqdm(resolutions):
+        sc.tl.leiden(joint_embedding, resolution=resolution)
+        aris.append(ARI(joint_embedding.obs['leiden'], mdata.obs[obs]))
+        nmis.append(NMI(joint_embedding.obs['leiden'], mdata.obs[obs]))
+    return resolutions, aris, nmis
+
+def leiden_multi_obsp(mdata, n_neighbors=15, neighbors_key='wnn', obs='rna:celltype', resolutions=10.**np.linspace(-2, 1, 20)):
+    aris = []
+    nmis = []
+    for resolution in tqdm(resolutions):
+        sc.tl.leiden(mdata, resolution=resolution, neighbors_key=neighbors_key, key_added='leiden_' + neighbors_key)
+        aris.append(ARI(mdata.obs['leiden_' + neighbors_key], mdata.obs[obs]))
+        nmis.append(NMI(mdata.obs['leiden_' + neighbors_key], mdata.obs[obs]))
+    return resolutions, aris, nmis
+
+def umap(mdata, obsm, n_neighbors=15, metric='euclidean'):
+    try:
+        joint_embedding = ad.AnnData(mdata.obsm[obsm].cpu().numpy(), obs=mdata.obs)
+    except:
+        joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
+    sc.pp.neighbors(joint_embedding, n_neighbors=n_neighbors, metric=metric)
+    sc.tl.umap(joint_embedding)
+
+    mdata.obsm[obsm + '_umap'] = joint_embedding.obsm['X_umap']
+
 def leiden(mdata, n_neighbors=15, obsm='W_OT', resolution=1):
-    joint_embedding = ad.AnnData(mdata.obsm[obsm].cpu().numpy(), obs=mdata.obs)
+    try:
+        joint_embedding = ad.AnnData(mdata.obsm[obsm].cpu().numpy(), obs=mdata.obs)
+    except:
+        joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
     sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors)
     sc.tl.leiden(joint_embedding, resolution=resolution)
     mdata.obs['leiden'] = joint_embedding.obs['leiden']
@@ -77,6 +116,37 @@ def trim_dimensions(mdata, dims):
 
 def sil_score(mdata, obsm='W_OT', obs='leiden'):
     return silhouette_score(mdata.obsm[obsm], mdata.obs[obs])
+
+def predict_features_corr(mdata, mod, n_neighbors, features_idx, remove_zeros=True, obsp=None, obsm=None):
+    if obsp:
+        distances = np.array(mdata.obsp[obsp].todense())
+        distances[distances == 0] = np.max(distances)
+        np.fill_diagonal(distances, 0)
+    else:
+        distances = cdist(mdata.obsm[obsm], mdata.obsm[obsm])
+    pred = np.zeros((mdata.n_obs, len(features_idx)))
+    for i in tqdm(range(mdata.n_obs)):
+        idx = distances[i].argsort()[1:1+n_neighbors]
+        pred[i] = np.mean(mdata[mod].X[idx][:,features_idx], axis=0)
+    truth = np.array(mdata[mod].X[:, features_idx])
+
+    pearson, spearman = [], []
+    for i in range(len(features_idx)):
+        x = truth[:,i]
+        y = pred[:,i]
+        idx = x > 0 if remove_zeros else np.arange(len(x))
+        pearson.append(pearsonr(x[idx], y[idx])[0])
+        spearman.append(spearmanr(x[idx], y[idx])[0])
+    
+    return pearson, spearman
+
+def knn_predict(mdata, obs, obsm='W_OT', max_neighbors=15):
+    distances = cdist(mdata.obsm[obsm], mdata.obsm[obsm])
+    s = 0
+    for i in tqdm(range(mdata.n_obs)):
+        idx = distances[i].argsort()[1:max_neighbors]
+        s += np.cumsum(np.array(mdata.obs[obs][i] == mdata.obs[obs][idx]))/np.arange(1, max_neighbors)
+    return s / mdata.n_obs
 
 def knn_score(mdata, obs, obsm='W_OT', max_neighbors=15):
     distances = cdist(mdata.obsm[obsm], mdata.obsm[obsm])

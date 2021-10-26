@@ -4,6 +4,7 @@ from torch.utils.data import DataLoader
 from torch import nn, optim
 from torch.autograd import Variable
 import torch.nn.functional as F
+from sklearn.decomposition import PCA
 
 # Form cost matrices
 from scipy.spatial.distance import cdist
@@ -19,9 +20,6 @@ import numpy as np
 import scanpy as sc
 import anndata as ad
 import muon as mu
-
-# Nonnegative least squares
-import nn_fac.nnls
 
 # Progress bar
 from tqdm import tqdm
@@ -46,7 +44,7 @@ class OTintNMF():
 
     """
     def __init__(self, latent_dim: int = 15, rho_h: float = 1e-1,
-                 rho_w: float = 1e-1, eps: float = 5e-2, cost='correlation'):
+                 rho_w: float = 1e-1, eps: float = 5e-2, cost='correlation', pca=False):
         # Check the user-defined parameters
         assert(latent_dim > 0)
         assert(rho_h > 0)
@@ -59,6 +57,7 @@ class OTintNMF():
         self.rho_w = rho_w
         self.eps = eps
         self.cost = cost
+        self.pca = pca
 
         # Other attributes
         self.losses_w, self.losses_h, self.losses = [], [], []
@@ -187,7 +186,7 @@ class OTintNMF():
         return loss.detach()
 
     def optimize(self, optimizer: torch.optim.Optimizer, loss_fn: Callable,
-                 max_iter: int, history: List, tol: float) -> None:
+                 max_iter: int, history: List, tol: float, pbar: None) -> None:
         """Optimize the dual variable based on the provided loss function
 
         Parameters
@@ -204,7 +203,13 @@ class OTintNMF():
             Tolerance for the convergence
 
         """
-        for _ in range(max_iter):
+
+        if len(self.losses) > 0:
+            total_loss = self.losses[-1].cpu().numpy()
+        else:
+            total_loss = '?'
+
+        for i in range(max_iter):
 
             def closure():
                 optimizer.zero_grad()
@@ -214,6 +219,12 @@ class OTintNMF():
 
             history.append(closure().detach())
             optimizer.step(closure)
+
+            if i % 10 == 0:
+                pbar.set_postfix({
+                    'loss': total_loss,
+                    'loss_inner': history[-1].cpu().numpy()
+                })
 
             if self.early_stop(history, tol):
                 break
@@ -239,19 +250,23 @@ class OTintNMF():
                 self.A[mod] = self.A[mod].todense()
             except:
                 pass
+            
+            if self.pca:
+                X = PCA(n_components=self.latent_dim).fit_transform(self.A[mod].T)
+            else:
+                X = 1e-6 + self.A[mod].T
+            # Compute K
+            if isinstance(self.cost, str):
+                C = cdist(X, X, metric=self.cost)
+            else:
+                C = cdist(X, X, metric=self.cost[mod])
+            C = torch.from_numpy(C).to(device=device, dtype=dtype)
+            C /= C.max()
+            self.K[mod] = torch.exp(-C/self.eps).to(device=device, dtype=dtype)
 
             # Normalize datasets
             self.A[mod] = 1e-6 + self.A[mod].T
             self.A[mod] /= self.A[mod].sum(0)
-
-            # Compute K
-            if isinstance(self.cost, str):
-                C = cdist(self.A[mod], self.A[mod], metric=self.cost)
-            else:
-                C = cdist(self.A[mod], self.A[mod], metric=self.cost[mod])
-            C = torch.from_numpy(C).to(device=device, dtype=dtype)
-            C /= C.max()
-            self.K[mod] = torch.exp(-C/self.eps).to(device=device, dtype=dtype)
 
             # Send A to PyTorch
             self.A[mod] = torch.from_numpy(self.A[mod]).to(
@@ -355,26 +370,9 @@ class OTintNMF():
         # Main loop
         for _ in range(max_iter):
 
-            # Optimize H
-            self.optimize(optimizer=optimizer, loss_fn=self.loss_fn_h,
-                max_iter=max_iter_inner, history=self.losses_h, tol=tol_inner)
-            # Update H
-            for mod in mdata.mod:
-                coef = self.rho_h
-                self.H[mod] = F.softmin(
-                    self.G[mod]@self.W.T/coef, dim=0).detach()
-            # Update progress bar
-            pbar.update(1)
-
-
-            # Save total dual loss, and add it in progress bar
-            self.losses.append(self.total_dual_loss())
-            pbar.set_postfix(loss=self.losses[-1].cpu().numpy())
-
-
             # Optimize W
             self.optimize(optimizer=optimizer, loss_fn=self.loss_fn_w,
-                max_iter=max_iter_inner, history=self.losses_w, tol=tol_inner)
+                max_iter=max_iter_inner, history=self.losses_w, tol=tol_inner, pbar=pbar)
             # Update W
             htgw = 0
             for mod in mdata.mod:
@@ -383,10 +381,412 @@ class OTintNMF():
             # Update progress bar
             pbar.update(1)
 
+            # Save total dual loss, and add it in progress bar
+            self.losses.append(self.total_dual_loss())
+
+            # Optimize H
+            self.optimize(optimizer=optimizer, loss_fn=self.loss_fn_h,
+                max_iter=max_iter_inner, history=self.losses_h, tol=tol_inner, pbar=pbar)
+            
+            # Update H
+            for mod in mdata.mod:
+                self.H[mod] = F.softmin(
+                    self.G[mod]@self.W.T/self.rho_h, dim=0).detach()
+            # Update progress bar
+            pbar.update(1)
+
+            # Save total dual loss, and add it in progress bar
+            self.losses.append(self.total_dual_loss())
+
+            # Early stopping
+            if self.early_stop(self.losses, tol_outer):
+                break
+
+        # Add H and W to mdata
+        for mod in mdata.mod:
+            mdata[mod].uns['H_OT'] = self.H[mod]
+        mdata.obsm['W_OT'] = self.W.T
+
+
+class UnbalancedOTintNMF():
+    """Unbalanced Optimal Transport Nonnegative Matrix Factorization model
+
+    Parameters
+    ----------
+    latent_dim : int
+        Number of latent dimensions.
+    rho_h : float
+        Regularization parameter of the positivity term on H
+    rho_w : float
+        Regularization parameter of the positivity term on W
+    eps : float
+        Entropic regularization parameter for the Optimal Transport distance.
+    tau : float
+        Unbalanced KL divergence term
+    cost : str or Dict
+        Name of function to compute the ground cost.
+
+    """
+    def __init__(self, latent_dim: int = 15, rho_h: float = 1e-1,
+                 rho_w: float = 1e-1, eps: float = 5e-2,
+                 tau: float = 5e-2, cost='correlation'):
+        # Check the user-defined parameters
+        assert(latent_dim > 0)
+        assert(rho_h > 0)
+        assert(rho_w > 0)
+        assert(eps > 0)
+
+        # Save as attributes
+        self.latent_dim = latent_dim
+        self.rho_h = rho_h
+        self.rho_w = rho_w
+        self.eps = eps
+        self.tau = tau
+        self.cost = cost
+
+        # Other attributes
+        self.losses_w, self.losses_h, self.losses = [], [], []
+        self.A, self.H, self.G, self.K = {}, {}, {}, {}
+
+    def reparam(self, G):
+        return self.tau*(1 - torch.exp(-G/self.tau))
+
+    def build_optimizer(self, params, lr: float, optim_name: str) -> torch.optim.Optimizer:
+        """Generates the optimizer
+
+        Parameters
+        ----------
+        params
+            parameters
+        lr : float
+            Learning rate
+
+        Returns
+        -------
+        torch.optim.Optimizer
+            An optimizer
+
+        """
+        if optim_name == 'lbfgs':
+            return optim.LBFGS(params, lr=lr, history_size=5, max_iter=1, line_search_fn='strong_wolfe')
+        elif optim_name == 'sgd':
+            return optim.SGD(params, lr=lr)
+        elif optim_name == 'adam':
+            return optim.Adam(params, lr=lr)
+
+    def divergence(self, X: torch.Tensor) -> torch.Tensor:
+        """Positivity barrier function
+
+        Parameters
+        ----------
+        X : torch.Tensor
+            The parameter to compute the divergence of.
+
+        Returns
+        -------
+        torch.Tensor
+            The divergence of X.
+
+        """
+        m = X.shape[0]
+        return X.sum() - torch.log(m*X).sum()/m
+
+    def divergence_dual_loss(self, Y: torch.Tensor) -> torch.Tensor:
+        """The dual of the divergence function.
+
+        Parameters
+        ----------
+        Y : torch.Tensor
+            The dual parameter.
+
+        Returns
+        -------
+        torch.Tensor
+            The dual divergence loss of Y
+
+        """
+        m = Y.shape[0]
+        return -torch.log(1 - Y).sum()/m
+
+    def ot_dual_loss(self, A: torch.Tensor, K: torch.Tensor,
+                     G: torch.Tensor) -> torch.Tensor:
+        """The (reparametrized!) dual optimal transport loss.
+
+        Parameters
+        ----------
+        A : torch.Tensor
+            The reference dataset
+        K : torch.Tensor
+            The exponentiated ground cost :math:`K=e^{-C/\epsilon}`
+        Y : torch.Tensor
+            The dual parameter
+
+        Returns
+        -------
+        torch.Tensor
+            The dual optimal transport loss of Y.
+        """
+        kappa = self.tau/(self.tau + self.eps)
+        loss = ((A**kappa) * (K @ torch.exp(G/self.eps))).sum()
+        return (self.eps+self.tau)*loss
+
+    def early_stop(self, history: List, tol: float) -> bool:
+        """Check if the early stopping criterion is valid
+
+        Parameters
+        ----------
+        history : List
+            The history of values to check.
+        tol : float
+            Tolerance of the value.
+
+        Returns
+        -------
+        bool
+            Whether one can stop early
+
+        """
+        if len(history) > 2 and abs(history[-1] - history[-2]) < tol:
+            return True
+        else:
+            return False
+
+    def total_dual_loss(self) -> torch.Tensor:
+        """Compute total dual loss
+
+        Returns
+        -------
+        torch.Tensor
+            The loss
+
+        """
+        loss = 0
+        for mod in self.A:
+            loss -= self.ot_dual_loss(self.A[mod], self.K[mod], self.G[mod])
+            loss += ((self.H[mod] @ self.W) * self.reparam(self.G[mod])).sum()
+            loss -= self.rho_w*self.divergence(self.W)
+            loss -= self.rho_h*self.divergence(self.H[mod])
+        return loss.detach()
+
+    def optimize(self, optimizer: torch.optim.Optimizer, loss_fn: Callable,
+                 max_iter: int, history: List, tol: float) -> None:
+        """Optimize the dual variable based on the provided loss function
+
+        Parameters
+        ----------
+        optimizer : torch.optim.Optimizer
+            Optimizer used
+        loss_fn : Callable
+            Loss function to optimize
+        max_iter : int
+            Max number of iterations
+        history : List
+            List to update with the values of the loss
+        tol : float
+            Tolerance for the convergence
+
+        """
+        for _ in range(max_iter):
+
+            def closure():
+                optimizer.zero_grad()
+                loss = loss_fn()
+                loss.backward()
+                return loss
+
+            history.append(closure().detach())
+            optimizer.step(closure)
+
+            if self.early_stop(history, tol):
+                break
+
+    def init_parameters(self, mdata: mu.MuData, dtype: torch.dtype,
+        device: torch.device) -> None:
+        """Init parameters before optimization
+
+        Parameters
+        ----------
+        mdata : mu.MuData
+            Input dataset
+
+        """
+
+        # For each modality
+        for mod in mdata.mod:
+
+            # Generate reference dataset A
+            idx = mdata[mod].var['highly_variable'].to_numpy()
+            self.A[mod] = mdata[mod].X[:,idx]
+            try:
+                self.A[mod] = self.A[mod].todense()
+            except:
+                pass
+
+            # Normalize datasets
+            self.A[mod] = 1e-6 + self.A[mod].T
+            self.A[mod] /= self.A[mod].sum(0).mean() # scale columns by the same factor
+
+            # Compute K
+            if isinstance(self.cost, str):
+                C = cdist(self.A[mod], self.A[mod], metric=self.cost)
+            else:
+                C = cdist(self.A[mod], self.A[mod], metric=self.cost[mod])
+            C = torch.from_numpy(C).to(device=device, dtype=dtype)
+            C /= C.max()
+            self.K[mod] = torch.exp(-C/(self.eps + self.tau)).to(device=device, dtype=dtype)
+
+            # Send A to PyTorch
+            self.A[mod] = torch.from_numpy(self.A[mod]).to(
+                device=device, dtype=dtype)
+
+            # Init H
+            n_vars = idx.sum()
+            self.H[mod] = torch.rand(
+                n_vars, self.latent_dim, device=device, dtype=dtype)
+
+            # Init G
+            self.G[mod] = torch.rand(n_vars, mdata[mod].n_obs, requires_grad=True, device=device, dtype=dtype)
+            #self.G[mod] = torch.nn.Parameter(-self.G[mod])
+
+        # Init W
+        self.W = torch.rand(
+            self.latent_dim, mdata.n_obs, device=device, dtype=dtype)
+
+    def loss_fn_h(self) -> torch.Tensor:
+        """Return the loss for the optimization of H
+
+        Returns
+        -------
+        torch.Tensor
+            The loss
+
+        """
+        loss_h = 0
+        modalities = self.A.keys()
+        for mod in modalities:
+            # OT dual loss term
+            loss_h += self.ot_dual_loss(
+                self.A[mod], self.K[mod], self.G[mod])
+            # Entropy dual loss term
+            coef = self.rho_h
+            loss_h -= coef*self.divergence_dual_loss(
+                    -self.reparam(self.G[mod])@self.W.T/coef)
+        return loss_h
+
+    def loss_fn_w(self) -> torch.Tensor:
+        """Return the loss for the optimization of W
+
+        Returns
+        -------
+        torch.Tensor
+            The loss
+
+        """
+        loss_w = 0
+        htgw = 0
+        modalities = self.A.keys()
+        for mod in modalities:
+            htgw += self.H[mod].T@self.reparam(self.G[mod])
+            loss_w += self.ot_dual_loss(
+                self.A[mod], self.K[mod], self.G[mod])
+        coef = len(modalities)*self.rho_w
+        loss_w -= coef*self.divergence_dual_loss(-htgw/coef)
+        return loss_w
+
+    def fit_transform(self, mdata: mu.MuData, max_iter_inner: int = 25,
+        max_iter: int = 25, device: torch.device = 'cpu', lr: float = 1e-2,
+        dtype: torch.dtype = torch.float, tol_inner: float = 1e-5,
+        tol_outer: float = 1e-3, optim_name: str = "lbfgs") -> None:
+        """Fit the model to the input multiomics dataset, and add the learned
+        factors to the Muon object.
+
+        Parameters
+        ----------
+        mdata : mu.MuData
+            Input dataset
+        max_iter_inner : int
+            Maximum number of iterations for the inner loop
+        max_iter : int
+            Maximum number of iterations for the outer loop
+        device : torch.device
+            Device to do computations on
+        lr : float
+            Learning rate
+        dtype : torch.dtype
+            Dtype of tensors
+        tol_inner : float
+            Tolerance for the inner loop convergence
+        tol_outer : float
+            Tolerance for the outer loop convergence (more tolerance is
+            advised in the outer loop)
+
+        """
+
+        # Initialization
+        self.init_parameters(mdata, dtype=dtype, device=device)
+        self.losses_w, self.losses_h, self.losses = [], [], []
+
+        # Building the optimizer
+        optimizer = self.build_optimizer(
+            [self.G[mod] for mod in mdata.mod], lr=lr, optim_name=optim_name)
+
+        # Progress bar
+        pbar = tqdm(total=2*max_iter, position=0, leave=True)
+
+        # Save total dual loss, and add it in progress bar
+        self.losses.append(self.total_dual_loss())
+        pbar.set_postfix(loss=self.losses[-1].cpu().numpy())
+
+        print('1st total dual loss:', self.losses[-1].cpu().numpy())
+
+        # Main loop
+        for _ in range(max_iter):
+
+            print('Optimizing H...')
+
+            # Optimize H
+            self.optimize(optimizer=optimizer, loss_fn=self.loss_fn_h,
+                max_iter=max_iter_inner, history=self.losses_h, tol=tol_inner)
+            # Update H
+            for mod in mdata.mod:
+                coef = self.rho_h
+                self.H[mod] = self.reparam(self.G[mod]) @ self.W.T/coef
+                self.H[mod] += 1/self.H[mod].shape[0]
+                self.H[mod] = 1/self.H[mod].detach()
+
+                print('H', mod, 'std', self.H[mod].std())
+                print('G', mod, 'std', self.G[mod].std())
+                print('Y', mod, 'std', self.reparam(self.G[mod]).std())
+            # Update progress bar
+            pbar.update(1)
 
             # Save total dual loss, and add it in progress bar
             self.losses.append(self.total_dual_loss())
             pbar.set_postfix(loss=self.losses[-1].cpu().numpy())
+
+            print('Optimizing W...')
+
+            # Optimize W
+            self.optimize(optimizer=optimizer, loss_fn=self.loss_fn_w,
+                max_iter=max_iter_inner, history=self.losses_w, tol=tol_inner)
+            # Update W
+            htgw = 0
+            for mod in mdata.mod:
+                htgw += self.H[mod].T@self.reparam(self.G[mod])/mdata.n_mod
+                print('G', mod, 'std', self.G[mod].std())
+                print('Y', mod, 'std', self.reparam(self.G[mod]).std())
+            self.W += 1/self.W.shape[0]
+            self.W = 1/self.W.detach()
+            # Update progress bar
+            pbar.update(1)
+
+            print('W std', self.W.std())
+
+            # Save total dual loss, and add it in progress bar
+            self.losses.append(self.total_dual_loss())
+            pbar.set_postfix(loss=self.losses[-1].cpu().numpy())
+
+            print('Total dual loss:', self.losses[-1].cpu().numpy())
 
 
             # Early stopping
