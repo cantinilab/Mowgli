@@ -11,6 +11,36 @@ from sklearn.metrics import adjusted_rand_score as ARI
 from sklearn.metrics import normalized_mutual_info_score as NMI
 from scipy.stats import pearsonr, spearmanr
 
+def umap(mdata: mu.MuData, obsm: str, n_neighbors: int = 15, metric: str = 'euclidean') -> None:
+    """Compute UMAP of the given `obsm`.
+
+    Args:
+        mdata (mu.MuData): Input data
+        obsm (str): The embedding
+        n_neighbors (int, optional): Number of neighbors for UMAP. Defaults to 15.
+        metric (str, optional): Which metric to compute neighbors. Defaults to 'euclidean'.
+    """
+    joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
+    sc.pp.neighbors(joint_embedding, n_neighbors=n_neighbors, metric=metric)
+    sc.tl.umap(joint_embedding)
+
+    mdata.obsm[obsm + '_umap'] = joint_embedding.obsm['X_umap']
+
+def sil_score(mdata: mu.MuData, obsm: str, obs: str) -> float:
+    """Compute silhouette score of an embedding
+
+    Args:
+        mdata (mu.MuData): Input data
+        obsm (str): Embedding
+        obs (str): Annotation
+
+    Returns:
+        float: Silhouette score
+    """
+    return silhouette_score(mdata.obsm[obsm], mdata.obs[obs])
+
+
+
 def variance_explained(mdata, score_function='explained_variance_score', plot=True):
     """experimental, i have to test this function"""
     if score_function == 'explained_variance_score':
@@ -68,16 +98,6 @@ def leiden_multi_obsp(mdata, n_neighbors=15, neighbors_key='wnn', obs='rna:cellt
         nmis.append(NMI(mdata.obs['leiden_' + neighbors_key], mdata.obs[obs]))
     return resolutions, aris, nmis
 
-def umap(mdata, obsm, n_neighbors=15, metric='euclidean'):
-    try:
-        joint_embedding = ad.AnnData(mdata.obsm[obsm].cpu().numpy(), obs=mdata.obs)
-    except:
-        joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
-    sc.pp.neighbors(joint_embedding, n_neighbors=n_neighbors, metric=metric)
-    sc.tl.umap(joint_embedding)
-
-    mdata.obsm[obsm + '_umap'] = joint_embedding.obsm['X_umap']
-
 def leiden(mdata, n_neighbors=15, obsm='W_OT', resolution=1):
     try:
         joint_embedding = ad.AnnData(mdata.obsm[obsm].cpu().numpy(), obs=mdata.obs)
@@ -113,9 +133,6 @@ def trim_dimensions(mdata, dims):
     mdata.obsm['W_OT'] = mdata.obsm['W_OT'][:,dims]
     for mod in mdata.mod:
         mdata[mod].uns['H_OT'] = mdata[mod].uns['H_OT'][:,dims]
-
-def sil_score(mdata, obsm='W_OT', obs='leiden'):
-    return silhouette_score(mdata.obsm[obsm], mdata.obs[obs])
 
 def predict_features_corr(mdata, mod, n_neighbors, features_idx, remove_zeros=True, obsp=None, obsm=None):
     if obsp:
