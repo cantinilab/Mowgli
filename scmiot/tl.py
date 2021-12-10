@@ -229,3 +229,23 @@ def best_leiden_resolution(mdata, obsm='W_OT', method='elbow', resolution_range=
             plt.show()
 
         return resolution_range[maxes[0]]
+
+def enrich(mdata, mod='rna', uns='H_OT', dim=2, ignore_first=0, n_genes=200,
+           sources=['GO:MF', 'GO:CC', 'GO:BP'],
+           ordered=True, display_max=15):
+    
+    ordered_genes = mdata[mod].var.index[mdata[mod].uns[uns][:,dim].argsort()[::-1]].tolist()
+    enrich = sc.queries.enrich(ordered_genes[ignore_first:n_genes], gprofiler_kwargs={
+        'ordered': ordered,
+        'sources': sources})
+    enrich['min_log10_p_value'] = -np.log10(enrich['p_value'])
+
+    rng = np.arange(min(enrich.shape[0], display_max))
+    plt.title('Enrichment for dimension ' + str(dim))
+    plt.hlines(y=rng[::-1], xmin=0, xmax=enrich['min_log10_p_value'][rng], color='skyblue')
+    plt.plot(enrich['min_log10_p_value'][rng][::-1], rng, 'o')
+    plt.yticks(rng, enrich['source'][rng][::-1] + ' : ' +  enrich['name'][rng][::-1])
+    plt.xlabel('$-\log_{10}$(p value)')
+    plt.show()
+    
+    return enrich
