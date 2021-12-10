@@ -15,8 +15,8 @@ dependencies:
   - bleach=3.3.0=pyhd3eb1b0_0
   - blosc=1.21.0=h8c45485_0
   - bzip2=1.0.8=h7b6447c_0
-  - ca-certificates=2021.4.13=h06a4308_1
-  - certifi=2020.12.5=py38h578d9bd_1
+  - ca-certificates=2021.9.30=h06a4308_1
+  - certifi=2021.5.30=py38h06a4308_0
   - cffi=1.14.5=py38h261ae71_0
   - cudatoolkit=10.2.89=hfd86e86_1
   - cycler=0.10.0=py38_0
@@ -105,7 +105,7 @@ dependencies:
   - numpy-base=1.20.1=py38h7d8b39e_0
   - olefile=0.46=py_0
   - openh264=2.1.0=hd408876_0
-  - openssl=1.1.1k=h7f98852_0
+  - openssl=1.1.1l=h7f8727e_0
   - packaging=20.9=pyhd3eb1b0_0
   - pandas=1.2.4=py38h2531618_0
   - pandoc=2.12=h06a4308_0
@@ -205,9 +205,11 @@ dependencies:
     - requests==2.25.1
     - requests-cache==0.6.3
     - requests-oauthlib==1.3.0
+    - rpy2==3.4.5
     - rsa==4.7.2
     - scanpy==1.7.2
     - scikit-misc==0.1.4
+    - scmiot==0.0.1
     - sinfo==0.3.4
     - sklearn==0.0
     - stdlib-list==0.8.0
