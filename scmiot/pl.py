@@ -5,7 +5,8 @@ import anndata as ad
 import numpy as np
 
 
-def heatmap(mdata: mu.MuData, obsm: str, groupby: str, cmap: str = 'viridis', sort_var: bool = False) -> None:
+def heatmap(mdata: mu.MuData, obsm: str, groupby: str, cmap: str = 'viridis',
+            sort_var: bool = False, save: str = None) -> None:
     """Produce a heatmap of an embedding
 
     Args:
@@ -21,4 +22,4 @@ def heatmap(mdata: mu.MuData, obsm: str, groupby: str, cmap: str = 'viridis', so
         idx = joint_embedding.var_names[joint_embedding.X.std(0).argsort()[::-1]]
     else:
         idx = joint_embedding.var_names
-    sc.pl.heatmap(joint_embedding, idx, groupby=groupby, cmap=cmap)
+    sc.pl.heatmap(joint_embedding, idx, groupby=groupby, cmap=cmap, save=save)

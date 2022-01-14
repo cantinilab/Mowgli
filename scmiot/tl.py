@@ -1,4 +1,5 @@
 # Biology
+from typing import Iterable, List, Tuple
 import scanpy as sc
 import muon as mu
 import anndata as ad
@@ -6,10 +7,11 @@ from sklearn.metrics import r2_score, explained_variance_score, silhouette_score
 import matplotlib.pyplot as plt
 import numpy as np
 from scipy.spatial.distance import cdist
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 from sklearn.metrics import adjusted_rand_score as ARI
 from sklearn.metrics import normalized_mutual_info_score as NMI
 from scipy.stats import pearsonr, spearmanr
+from sknetwork.topology import get_connected_components
 
 def umap(mdata: mu.MuData, obsm: str, n_neighbors: int = 15, metric: str = 'euclidean') -> None:
     """Compute UMAP of the given `obsm`.
@@ -39,7 +41,137 @@ def sil_score(mdata: mu.MuData, obsm: str, obs: str) -> float:
     """
     return silhouette_score(mdata.obsm[obsm], mdata.obs[obs])
 
+def knn_score(mdata: mu.MuData, obs: str, obsm: str = 'W_OT', max_neighbors: int = 15) -> List:
+    """Computes the k-NN purity score, for varying numbers of neighbors between 1 and 15.
 
+    Args:
+        mdata (mu.MuData): Input data
+        obs (str): Annotation
+        obsm (str, optional): Embedding. Defaults to 'W_OT'.
+        max_neighbors (int, optional): Maximum number of neighbors. Defaults to 15.
+
+    Returns:
+        List[int]: The kNN scores for varying k.
+    """    
+    distances = cdist(mdata.obsm[obsm], mdata.obsm[obsm])
+    s = 0
+    for i in tqdm(range(mdata.n_obs)):
+        idx = distances[i].argsort()[1:max_neighbors]
+        s += np.cumsum(np.array(mdata.obs[obs][i] == mdata.obs[obs][idx]))/np.arange(1, max_neighbors)
+    return s / mdata.n_obs
+
+def leiden_multi(mdata: mu.MuData, n_neighbors: int = 15,
+                obsm: str = 'W_OT', obs: str = 'rna:celltype',
+                resolutions: Iterable[float] = np.arange(.1, 2.1, .1)):
+    """Compute leiden clustering for multiple resultions, and return ARI and NMI.
+
+    Args:
+        mdata (mu.MuData): Input data.
+        n_neighbors (int, optional): Number of neighbors. Defaults to 15.
+        obsm (str, optional): Obsm to use. Defaults to 'W_OT'.
+        obs (str, optional): Annotation. Defaults to 'rna:celltype'.
+        resolutions (Iterable[float], optional): Iterable of resultions. Defaults to np.arange(.1, 2.1, .1).
+
+    Returns:
+        [type]: [description]
+    """    
+    joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
+    aris, nmis = [], []
+    sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors)
+    for resolution in tqdm(resolutions):
+        sc.tl.leiden(joint_embedding, resolution=resolution)
+        aris.append(ARI(joint_embedding.obs['leiden'], mdata.obs[obs]))
+        nmis.append(NMI(joint_embedding.obs['leiden'], mdata.obs[obs]))
+    return resolutions, aris, nmis
+
+def leiden_multi_silhouette(mdata: mu.MuData, n_neighbors: int = 15,
+                obsm: str = 'W_OT', obs: str = 'rna:celltype',
+                resolutions: Iterable[float] = np.arange(.1, 2.1, .1)):
+    """Compute leiden clustering for multiple resultions, and return ARI and NMI.
+
+    Args:
+        mdata (mu.MuData): Input data.
+        n_neighbors (int, optional): Number of neighbors. Defaults to 15.
+        obsm (str, optional): Obsm to use. Defaults to 'W_OT'.
+        obs (str, optional): Annotation. Defaults to 'rna:celltype'.
+        resolutions (Iterable[float], optional): Iterable of resultions. Defaults to np.arange(.1, 2.1, .1).
+
+    Returns:
+        [type]: [description]
+    """    
+    joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
+    sils = []
+    sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors)
+    for resolution in tqdm(resolutions):
+        sc.tl.leiden(joint_embedding, resolution=resolution)
+        if len(np.unique(joint_embedding.obs['leiden'])) > 1:
+            sils.append(silhouette_score(joint_embedding.X, joint_embedding.obs['leiden']))
+        else:
+            sils.append(-1)
+    return resolutions, sils
+
+def predict_features_corr(mdata: mu.MuData, mod: str, n_neighbors: int,
+                        features_idx: Iterable[int] = [],
+                        remove_zeros: bool = True, obsp: str = None,
+                        obsm: str = None):
+    """Output a the Pearson and Spearman correlation scores between the actual
+       values of a modality and the prediction based on a joint embedding.
+
+    Args:
+        mdata (mu.MuData): Input data
+        mod (str): Modality to predict
+        n_neighbors (int): Number of neigbours
+        features_idx (Iterable[int]): List of feature indices
+        remove_zeros (bool, optional): Whether to remove values from the data.
+            Indeed they might be dropouts, in which case the prediction might
+            be better than the real values. Defaults to True.
+        obsp (str, optional): Obsp key with distances. Defaults to None.
+        obsm (str, optional): Obsm key with embedding. Defaults to None.
+
+    Returns:
+        Tuple((List, List)): Pearson correlation, Spearman correlation
+    """
+
+    if len(features_idx) == 0:
+        features_idx = np.arange(mdata[mod].n_vars)
+
+    if obsp: # If nearest neighbour distances are already computed.
+        distances = np.array(mdata.obsp[obsp].todense())
+        distances[distances == 0] = np.max(distances)
+        np.fill_diagonal(distances, 0)
+    else: # Else use obsm.
+        distances = cdist(mdata.obsm[obsm], mdata.obsm[obsm])
+    
+    # Initialize prediction
+    pred = np.zeros((mdata.n_obs, len(features_idx)))
+
+    # For each cell,
+    for i in tqdm(range(mdata.n_obs)):
+        # Recover neighbors' indices
+        idx = distances[i].argsort()[1:1+n_neighbors]
+
+        # Take the mean of neighbors as prediction
+        pred[i] = np.mean(mdata[mod].X[idx][:,features_idx], axis=0)
+    
+    # The truth to compute correlation against.
+    truth = np.array(mdata[mod].X[:, features_idx])
+
+    # Intitialize correlation
+    pearson, spearman = [], []
+
+    # For each cell,
+    for i in range(len(features_idx)):
+        # Truth and prediction for a given cell i
+        x, y = truth[:,i], pred[:,i]
+
+        # If `remove_zeros`, select indices where x > 0
+        idx = x > 0 if remove_zeros else np.arange(len(x))
+
+        # Append to correlation lists.
+        pearson.append(pearsonr(x[idx], y[idx])[0])
+        spearman.append(spearmanr(x[idx], y[idx])[0])
+    
+    return pearson, spearman
 
 def variance_explained(mdata, score_function='explained_variance_score', plot=True):
     """experimental, i have to test this function"""
@@ -75,28 +207,61 @@ def variance_explained(mdata, score_function='explained_variance_score', plot=Tr
         plt.show()
     return score
 
-def leiden_multi(mdata, n_neighbors=15, obsm='W_OT', obs='rna:celltype', resolutions=10.**np.linspace(-2, 1, 20)):
-    try:
-        joint_embedding = ad.AnnData(mdata.obsm[obsm].cpu().numpy(), obs=mdata.obs)
-    except:
-        joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
-    aris = []
-    nmis = []
-    sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors)
-    for resolution in tqdm(resolutions):
-        sc.tl.leiden(joint_embedding, resolution=resolution)
-        aris.append(ARI(joint_embedding.obs['leiden'], mdata.obs[obs]))
-        nmis.append(NMI(joint_embedding.obs['leiden'], mdata.obs[obs]))
-    return resolutions, aris, nmis
+def graph_connectivity(mdata: mu.MuData, obs: str, obsm: str,
+                      n_neighbors: int = 15) -> float:
+    """Compute graph connectivity score, as defined in OpenProblems.
 
-def leiden_multi_obsp(mdata, n_neighbors=15, neighbors_key='wnn', obs='rna:celltype', resolutions=10.**np.linspace(-2, 1, 20)):
-    aris = []
-    nmis = []
-    for resolution in tqdm(resolutions):
-        sc.tl.leiden(mdata, resolution=resolution, neighbors_key=neighbors_key, key_added='leiden_' + neighbors_key)
-        aris.append(ARI(mdata.obs['leiden_' + neighbors_key], mdata.obs[obs]))
-        nmis.append(NMI(mdata.obs['leiden_' + neighbors_key], mdata.obs[obs]))
-    return resolutions, aris, nmis
+    Args:
+        mdata (mu.MuData): Input data
+        obs (str): Observation key
+        obsm (str): Obsm key
+        n_neighbors (int, optional): Number of neighbors. Defaults to 15.
+
+    Returns:
+        float: graph connectivity score
+    """
+    # Represent the joint embedding as an AnnData object.
+    joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
+
+    # Find the joint embedding's neighbors.
+    sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=15)
+
+    # Define the adjacency matrix
+    adjacency = joint_embedding.obsp['distances']
+
+    # Initialize the proportions
+    props = []
+
+    # For all unique obsevervation categories,
+    for celltype in np.unique(mdata.obs[obs]):
+
+        # Define the indices of cells concerned.
+        idx = np.where(mdata.obs[obs] == celltype)[0]
+
+        try:
+            # Find the connected components in the category's subgraph.
+            conn_comp = get_connected_components(adjacency[idx][:,idx], connection='strong')
+
+            # Count the occurences of the components.
+            _, counts = np.unique(conn_comp, return_counts=True)
+
+            # The proportion is the largest component over the number of cells in the cluster.
+            props.append(counts.max() / idx.shape[0])
+        except:
+            props.append(0)
+            print('Warning: empty component')
+
+    # Return average of the proportions.
+    return np.array(props).mean()
+
+# def leiden_multi_obsp(mdata, n_neighbors=15, neighbors_key='wnn', obs='rna:celltype', resolutions=10.**np.linspace(-2, 1, 20)):
+#     aris = []
+#     nmis = []
+#     for resolution in tqdm(resolutions):
+#         sc.tl.leiden(mdata, resolution=resolution, neighbors_key=neighbors_key, key_added='leiden_' + neighbors_key)
+#         aris.append(ARI(mdata.obs['leiden_' + neighbors_key], mdata.obs[obs]))
+#         nmis.append(NMI(mdata.obs['leiden_' + neighbors_key], mdata.obs[obs]))
+#     return resolutions, aris, nmis
 
 def leiden(mdata, n_neighbors=15, obsm='W_OT', resolution=1):
     try:
@@ -133,45 +298,6 @@ def trim_dimensions(mdata, dims):
     mdata.obsm['W_OT'] = mdata.obsm['W_OT'][:,dims]
     for mod in mdata.mod:
         mdata[mod].uns['H_OT'] = mdata[mod].uns['H_OT'][:,dims]
-
-def predict_features_corr(mdata, mod, n_neighbors, features_idx, remove_zeros=True, obsp=None, obsm=None):
-    if obsp:
-        distances = np.array(mdata.obsp[obsp].todense())
-        distances[distances == 0] = np.max(distances)
-        np.fill_diagonal(distances, 0)
-    else:
-        distances = cdist(mdata.obsm[obsm], mdata.obsm[obsm])
-    pred = np.zeros((mdata.n_obs, len(features_idx)))
-    for i in tqdm(range(mdata.n_obs)):
-        idx = distances[i].argsort()[1:1+n_neighbors]
-        pred[i] = np.mean(mdata[mod].X[idx][:,features_idx], axis=0)
-    truth = np.array(mdata[mod].X[:, features_idx])
-
-    pearson, spearman = [], []
-    for i in range(len(features_idx)):
-        x = truth[:,i]
-        y = pred[:,i]
-        idx = x > 0 if remove_zeros else np.arange(len(x))
-        pearson.append(pearsonr(x[idx], y[idx])[0])
-        spearman.append(spearmanr(x[idx], y[idx])[0])
-    
-    return pearson, spearman
-
-def knn_predict(mdata, obs, obsm='W_OT', max_neighbors=15):
-    distances = cdist(mdata.obsm[obsm], mdata.obsm[obsm])
-    s = 0
-    for i in tqdm(range(mdata.n_obs)):
-        idx = distances[i].argsort()[1:max_neighbors]
-        s += np.cumsum(np.array(mdata.obs[obs][i] == mdata.obs[obs][idx]))/np.arange(1, max_neighbors)
-    return s / mdata.n_obs
-
-def knn_score(mdata, obs, obsm='W_OT', max_neighbors=15):
-    distances = cdist(mdata.obsm[obsm], mdata.obsm[obsm])
-    s = 0
-    for i in tqdm(range(mdata.n_obs)):
-        idx = distances[i].argsort()[1:max_neighbors]
-        s += np.cumsum(np.array(mdata.obs[obs][i] == mdata.obs[obs][idx]))/np.arange(1, max_neighbors)
-    return s / mdata.n_obs
 
 def best_leiden_resolution(mdata, obsm='W_OT', method='elbow', resolution_range=None, n_neighbors=15, plot=True):
     if resolution_range==None:
@@ -230,22 +356,46 @@ def best_leiden_resolution(mdata, obsm='W_OT', method='elbow', resolution_range=
 
         return resolution_range[maxes[0]]
 
-def enrich(mdata, mod='rna', uns='H_OT', dim=2, ignore_first=0, n_genes=200,
-           sources=['GO:MF', 'GO:CC', 'GO:BP'],
-           ordered=True, display_max=15):
+def enrich(mdata: mu.MuData, mod: str = 'rna', uns: str = 'H_OT', n_genes: int = 200,
+           sources: Iterable[str] = ['GO:MF', 'GO:CC', 'GO:BP'], ordered: bool = True):
+    """Return Gene Set Enrichment Analysis results for each dimension.
+
+    Args:
+        mdata (mu.MuData): Input data.
+        mod (str, optional): Modality that contains genes. Defaults to 'rna'.
+        uns (str, optional): Name of H matrix. Defaults to 'H_OT'.
+        n_genes (int, optional): Number of top genes by dimension. Defaults to 200.
+        sources (Iterable[str], optional): Enrichment sources. Defaults to ['GO:MF', 'GO:CC', 'GO:BP'].
+        ordered (bool, optional): Make query with ordered genes. Defaults to True.
+
+    Returns:
+        [type]: Pandas dataframe with the results of the queries, as well as average best p_value across dimensions.
+    """    
     
-    ordered_genes = mdata[mod].var.index[mdata[mod].uns[uns][:,dim].argsort()[::-1]].tolist()
-    enrich = sc.queries.enrich(ordered_genes[ignore_first:n_genes], gprofiler_kwargs={
+    # Initialize ordered genes dictionary.
+    ordered_genes = {}
+
+    # For each dimension,
+    for dim in range(mdata[mod].uns[uns].shape[1]):
+        # Sort the gene indices by weight.
+        idx_sorted = mdata[mod].uns[uns][:,dim].argsort()[::-1]
+
+        # Select the `n_genes` highest genes.
+        gene_list = mdata[mod].var.index[idx_sorted].tolist()[:n_genes]
+
+        # Input them in the dictionary.
+        ordered_genes['dimension ' + str(dim)] = gene_list
+
+    # Make the queries to gProfiler, specifying if genes are ordered.
+    enr = sc.queries.enrich(ordered_genes, gprofiler_kwargs={
         'ordered': ordered,
         'sources': sources})
-    enrich['min_log10_p_value'] = -np.log10(enrich['p_value'])
-
-    rng = np.arange(min(enrich.shape[0], display_max))
-    plt.title('Enrichment for dimension ' + str(dim))
-    plt.hlines(y=rng[::-1], xmin=0, xmax=enrich['min_log10_p_value'][rng], color='skyblue')
-    plt.plot(enrich['min_log10_p_value'][rng][::-1], rng, 'o')
-    plt.yticks(rng, enrich['source'][rng][::-1] + ' : ' +  enrich['name'][rng][::-1])
-    plt.xlabel('$-\log_{10}$(p value)')
-    plt.show()
     
-    return enrich
+    # Compute the average of the best p_values for each dimension.
+    mean_best_p = enr.groupby('query')['p_value'].min().mean()
+
+    # Print the 5 top results.
+    print(enr.loc[:5, ['name', 'p_value', 'query']])
+
+    # Return the results of the queries and the average best p_value.
+    return enr, mean_best_p

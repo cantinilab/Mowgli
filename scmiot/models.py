@@ -5,6 +5,7 @@ import torch.nn.functional as F
 from sklearn.decomposition import PCA
 
 # Form cost matrices
+import numpy as np
 from scipy.spatial.distance import cdist
 
 # Typing
@@ -30,29 +31,34 @@ class OTintNMF():
         cost (str, optional): Distance function compatible with `scipy.spatial.distance.cdist`, used to compute an empirical cost between features. If a dictionary is passed, different functions can be used for each modality. Defaults to 'correlation'.
         pca (bool, optional): If `True`, the cost is computed on a PCA embedding of the features, of size `latent_dim`. Defaults to False.
     """
-    def __init__(self, latent_dim: int = 15, rho_h: float = 1e-1, rho_w: float = 1e-1,
-                 eps: float = 5e-2, cost: str = 'correlation', pca: bool = False):
 
-        # Check the user-defined parameters
+    def __init__(self, latent_dim: int = 15, rho_h: float = 1e-1, rho_w: float = 1e-1,
+                 eps: float = 5e-2, cost: str = 'correlation', pca: bool = False,
+                 cost_path: dict = None):
+
+        # Check that the user-defined parameters are valid.
         assert(latent_dim > 0)
         assert(rho_h > 0)
         assert(rho_w > 0)
         assert(eps > 0)
 
-        # Save args as attributes
+        # Save arguments as attributes.
         self.latent_dim = latent_dim
         self.rho_h = rho_h
         self.rho_w = rho_w
         self.eps = eps
         self.cost = cost
+        self.cost_path = cost_path
         self.pca = pca
 
-        # Init other attributes
+        # Initialize the loss histories.
         self.losses_w, self.losses_h, self.losses = [], [], []
+
+        # Initialize the dictionaries containing matrices for each omics.
         self.A, self.H, self.G, self.K = {}, {}, {}, {}
 
     def init_parameters(self, mdata: mu.MuData, dtype: torch.dtype,
-        device: torch.device) -> None:
+        device: torch.device, force_recompute: bool = False) -> None:
         """Initialize parameters before optimization
 
         Args:
@@ -61,49 +67,87 @@ class OTintNMF():
             device (torch.device): Device (e.g. cuda)
         """
 
-        # For each modality
+        # For each modality,
         for mod in mdata.mod:
 
-            # Generate reference dataset A
+            ################ Generate the reference dataset A. ################
+
+            # Select the highly variable features.
             idx = mdata[mod].var['highly_variable'].to_numpy()
+
+            # Keep only the highly variable features.
             self.A[mod] = mdata[mod].X[:,idx]
+
+            # If the dataset is sparse, make it dense.
             try:
                 self.A[mod] = self.A[mod].todense()
             except:
                 pass
             
-            if self.pca:
-                X = PCA(n_components=self.latent_dim).fit_transform(self.A[mod].T)
-            else:
+            ####################### Compute ground cost #######################
+
+            # If `pca`, then compute the ground cost on PCA embeddings.
+            if self.pca: 
+                pca = PCA(n_components=self.latent_dim)
+                X = pca.fit_transform(self.A[mod].T)
+            # Else, compute the cost on the transposed matrix.
+            else: 
                 X = 1e-6 + self.A[mod].T
-            # Compute K
-            if isinstance(self.cost, str):
-                C = cdist(X, X, metric=self.cost)
-            else:
-                C = cdist(X, X, metric=self.cost[mod])
+            
+            # Use the specified cost function to compute ground cost.
+            cost = self.cost if isinstance(self.cost, str) else self.cost[mod]
+            
+            # Initialized the `recomputed variable`.
+            recomputed = False
+
+            # If we force recomputing, then compute the ground cost.
+            if force_recompute:
+                C = cdist(X, X, metric=cost)
+                recomputed = True
+            
+            # If the cost is not yet computed, try to load it or compute it.
+            if not recomputed:
+                try:
+                    C = np.load(self.cost_path[mod])
+                    recomputed = False
+                except:
+                    C = cdist(X, X, metric=cost)
+                    recomputed = True
+            
+            # If we did recompute the cost, save it.
+            if recomputed and self.cost_path:
+                np.save(self.cost_path[mod], C)
+            
+            # Normalize the cost with infinity norm.
             C = torch.from_numpy(C).to(device=device, dtype=dtype)
             C /= C.max()
+
+            # Compute the kernel K
             self.K[mod] = torch.exp(-C/self.eps).to(device=device, dtype=dtype)
 
-            # Normalize datasets
+            ######################## Normalize dataset ########################
+
+            # Add a small value for numerical stability, and normalize `A`.
             self.A[mod] = 1e-6 + self.A[mod].T
             self.A[mod] /= self.A[mod].sum(0)
 
-            # Send A to PyTorch
+            # Send the matrix `A` to PyTorch.
             self.A[mod] = torch.from_numpy(self.A[mod]).to(
                 device=device, dtype=dtype)
 
-            # Init H
+            ####################### Initialize matrices #######################
+
+            # Initialize the factor `H`.
             n_vars = idx.sum()
             self.H[mod] = torch.rand(
                 n_vars, self.latent_dim, device=device, dtype=dtype)
             self.H[mod] /= self.H[mod].sum(0)
 
-            # Init G
+            # Initialize the dual variable `G`
             self.G[mod] = torch.rand(n_vars, mdata[mod].n_obs,
                 requires_grad=True, device=device, dtype=dtype)
 
-        # Init W
+        # Initialize the shared factor `W`
         self.W = torch.rand(
             self.latent_dim, mdata.n_obs, device=device, dtype=dtype)
         self.W /= self.W.sum(0)
@@ -127,53 +171,64 @@ class OTintNMF():
             optim_name (str, optional): Name of optimizer. See `build_optimizer`. Defaults to "lbfgs".
         """
 
-        # Initialization
+        # First, initialize the different parameters.
         self.init_parameters(mdata, dtype=dtype, device=device)
+
+        # Initialize the loss histories.
         self.losses_w, self.losses_h, self.losses = [], [], []
 
-        # Building the optimizer
+        # Build the optimizer.
         optimizer = self.build_optimizer(
             [self.G[mod] for mod in mdata.mod], lr=lr, optim_name=optim_name)
 
-        # Progress bar
+        # Set up the progress bar.
         pbar = tqdm(total=2*max_iter, position=0, leave=True)
 
-        # Main loop
+        # This is the main loop, with at most `max_iter` iterations.
         for _ in range(max_iter):
 
-            # Optimize W
+            ############################## W step #############################
+
+            # Optimize the dual variable `G`.
             self.optimize(optimizer=optimizer, loss_fn=self.loss_fn_w,
-                max_iter=max_iter_inner, history=self.losses_w, tol=tol_inner, pbar=pbar)
-            # Update W
+                max_iter=max_iter_inner, history=self.losses_w,
+                tol=tol_inner, pbar=pbar)
+            
+            # Update the shared factor `W`.
             htgw = 0
             for mod in mdata.mod:
                 htgw += self.H[mod].T@self.G[mod]/len(mdata.mod)
             self.W = F.softmin(htgw/self.rho_w, dim=0).detach()
-            # Update progress bar
+            
+            # Update the progress bar.
             pbar.update(1)
 
-            # Save total dual loss, and add it in progress bar
+            # Save the total dual loss.
             self.losses.append(self.total_dual_loss())
 
-            # Optimize H
+            ############################## H step #############################
+
+            # Optimize the dual variable `G`.
             self.optimize(optimizer=optimizer, loss_fn=self.loss_fn_h,
-                max_iter=max_iter_inner, history=self.losses_h, tol=tol_inner, pbar=pbar)
+                max_iter=max_iter_inner, history=self.losses_h,
+                tol=tol_inner, pbar=pbar)
             
-            # Update H
+            # Update the omic specific factors `H[mod]`.
             for mod in mdata.mod:
                 self.H[mod] = F.softmin(
                     self.G[mod]@self.W.T/self.rho_h, dim=0).detach()
-            # Update progress bar
+            
+            # Update the progress bar.
             pbar.update(1)
 
-            # Save total dual loss, and add it in progress bar
+            # Save the total dual loss.
             self.losses.append(self.total_dual_loss())
 
             # Early stopping
             if self.early_stop(self.losses, tol_outer):
                 break
 
-        # Add H and W to mdata
+        # Add H and W to the MuData object.
         for mod in mdata.mod:
             mdata[mod].uns['H_OT'] = self.H[mod].cpu().numpy()
         mdata.obsm['W_OT'] = self.W.T.cpu().numpy()
@@ -208,28 +263,34 @@ class OTintNMF():
             tol (float): Tolerance for the convergence
             pbar (None): `tqdm` progress bar
         """
-        if len(self.losses) > 0:
-            total_loss = self.losses[-1].cpu().numpy()
-        else:
-            total_loss = '?'
 
+        # This value will be displayed in the progress bar
+        total_loss = self.losses[-1].cpu().numpy() if len(self.losses) > 0 else '?'
+
+        # This is the main optimization loop.
         for i in range(max_iter):
-
+            
+            # Define the closure function required by the optimizer.
             def closure():
                 optimizer.zero_grad()
                 loss = loss_fn()
                 loss.backward()
                 return loss
 
+            # Add a value to the loss history.
             history.append(closure().detach())
+
+            # Perform an optimization step.
             optimizer.step(closure)
 
+            # Every 10 steps, update the progress bar.
             if i % 10 == 0:
                 pbar.set_postfix({
                     'loss': total_loss,
                     'loss_inner': history[-1].cpu().numpy()
                 })
 
+            # Attempt early stopping
             if self.early_stop(history, tol):
                 break
     
@@ -258,10 +319,15 @@ class OTintNMF():
         Returns:
             torch.Tensor:  The entropy of X.
         """
+
+        # TODO: KL div can take log input as well! see log_softmax ?
+
         if min_one:
-            return -torch.nan_to_num(X*(X.log()-1)).sum()
+            # return -torch.nan_to_num(X*(X.log()-1)).sum()
+            return F.kl_div(torch.ones_like(X), X, reduction='sum')
         else:
-            return -torch.nan_to_num(X*X.log()).sum()
+            # return -torch.nan_to_num(X*X.log()).sum()
+            return F.kl_div(torch.zeros_like(X), X, reduction='sum')
 
     def entropy_dual_loss(self, Y: torch.Tensor) -> torch.Tensor:
         """The dual of the entropy function.
@@ -298,12 +364,28 @@ class OTintNMF():
         Returns:
             torch.Tensor: The loss
         """
+
+        # Initialize the loss to zero.
         loss = 0
-        for mod in self.A:
+
+        # Recover the modalities (omics).
+        modalities = self.A.keys()
+
+        # For each modality,
+        for mod in modalities:
+            # Add the OT dual loss.
             loss -= self.ot_dual_loss(self.A[mod], self.K[mod], self.G[mod])
+
+            # Add the Lagranger multiplier term.
             loss += ((self.H[mod] @ self.W) * self.G[mod]).sum()
-            loss -= self.rho_w*self.entropy(self.W)
+
+            # Add the `H[mod]` entropy term.
             loss -= self.rho_h*self.entropy(self.H[mod])
+        
+        # Add the `W` entropy term.
+        loss -= len(modalities)*self.rho_w*self.entropy(self.W)
+
+        # Return the full loss.
         return loss.detach()
     
     def loss_fn_h(self) -> torch.Tensor:
