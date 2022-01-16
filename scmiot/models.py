@@ -4,9 +4,15 @@ from torch import nn, optim
 import torch.nn.functional as F
 from sklearn.decomposition import PCA
 
+# Einops
+from opt_einsum import contract
+
 # Form cost matrices
 import numpy as np
 from scipy.spatial.distance import cdist
+
+# LazyTensor
+from pykeops.torch import LazyTensor
 
 # Typing
 from typing import List, Set, Dict, Tuple, Optional
@@ -55,7 +61,7 @@ class OTintNMF():
         self.losses_w, self.losses_h, self.losses = [], [], []
 
         # Initialize the dictionaries containing matrices for each omics.
-        self.A, self.H, self.G, self.K = {}, {}, {}, {}
+        self.A, self.H, self.G, self.C = {}, {}, {}, {}
 
     def init_parameters(self, mdata: mu.MuData, dtype: torch.dtype,
         device: torch.device, force_recompute: bool = False) -> None:
@@ -96,34 +102,57 @@ class OTintNMF():
             
             # Use the specified cost function to compute ground cost.
             cost = self.cost if isinstance(self.cost, str) else self.cost[mod]
-            
-            # Initialized the `recomputed variable`.
-            recomputed = False
 
-            # If we force recomputing, then compute the ground cost.
-            if force_recompute:
-                C = cdist(X, X, metric=cost)
-                recomputed = True
+            # If we want to use a lazy KeOps cost,
+            if cost == 'lazy':
+                # We are compute a cosine ground cost, so normalize first.
+                X = torch.from_numpy(X).to(device=device, dtype=dtype)
+                X = X.T
+                X /= torch.norm(X, dim=0)
+                X = X.T
+
+                # Initialize the LazyTensors.
+                x_i = LazyTensor(X[:,None,:])
+                x_j = LazyTensor(X[None,:,:])
+
+                # This is the cosine distance.
+                C_ij = 1 - (x_i * x_j).sum(dim=2)
+
+                # This is the cosien distance kernel.
+                self.C[mod] = (-C_ij/self.eps).exp()
+            # Otherwise, compute a regular ground cost
+            else:
             
-            # If the cost is not yet computed, try to load it or compute it.
-            if not recomputed:
-                try:
-                    C = np.load(self.cost_path[mod])
-                    recomputed = False
-                except:
+                # Initialize the `recomputed variable`.
+                recomputed = False
+
+                # If we force recomputing, then compute the ground cost.
+                if force_recompute:
                     C = cdist(X, X, metric=cost)
                     recomputed = True
-            
-            # If we did recompute the cost, save it.
-            if recomputed and self.cost_path:
-                np.save(self.cost_path[mod], C)
-            
-            # Normalize the cost with infinity norm.
-            C = torch.from_numpy(C).to(device=device, dtype=dtype)
-            C /= C.max()
+                
+                # If the cost is not yet computed, try to load it or compute it.
+                if not recomputed:
+                    try:
+                        C = np.load(self.cost_path[mod])
+                        recomputed = False
+                    except:
+                        C = cdist(X, X, metric=cost)
+                        recomputed = True
+                
+                # If we did recompute the cost, save it.
+                if recomputed and self.cost_path:
+                    np.save(self.cost_path[mod], C)
+                
+                # Normalize the cost with infinity norm.
+                C = torch.from_numpy(C).to(device=device, dtype=dtype)
+                C /= C.max()
+                
+                # self.C[mod] = C
 
-            # Compute the kernel K
-            self.K[mod] = torch.exp(-C/self.eps).to(device=device, dtype=dtype)
+                # Compute the kernel K
+                self.C[mod] = torch.exp(-C/self.eps).to(device=device, dtype=dtype)
+
 
             ######################## Normalize dataset ########################
 
@@ -153,8 +182,8 @@ class OTintNMF():
         self.W /= self.W.sum(0)
 
     def fit_transform(self, mdata: mu.MuData, max_iter_inner: int = 25,
-        max_iter: int = 25, device: torch.device = 'cpu', lr: float = 1e-2,
-        dtype: torch.dtype = torch.float, tol_inner: float = 1e-5,
+        max_iter: int = 25, device: torch.device = 'cpu', lr: float = 1,
+        dtype: torch.dtype = torch.float, tol_inner: float = 1e-9,
         tol_outer: float = 1e-3, optim_name: str = "lbfgs") -> None:
         """Fit the model to the input multiomics dataset, and add the learned
         factors to the Muon object.
@@ -225,7 +254,7 @@ class OTintNMF():
             self.losses.append(self.total_dual_loss())
 
             # Early stopping
-            if self.early_stop(self.losses, tol_outer):
+            if self.early_stop(self.losses, tol_outer, nonincreasing=True):
                 break
 
         # Add H and W to the MuData object.
@@ -294,7 +323,7 @@ class OTintNMF():
             if self.early_stop(history, tol):
                 break
     
-    def early_stop(self, history: List, tol: float) -> bool:
+    def early_stop(self, history: List, tol: float, nonincreasing: bool = False) -> bool:
         """Check if the early soptting criterion is valid
 
         Args:
@@ -304,10 +333,24 @@ class OTintNMF():
         Returns:
             bool: Whether one can stop early
         """
-        if len(history) > 2 and abs(history[-1] - history[-2]) < tol:
+        # If we have a nan or infinite, return early.
+        if not torch.isfinite(history[-1]):
             return True
-        else:
+        
+        # If the history is too short, continue.
+        if len(history) < 3:
             return False
+        
+        # If the next value is worse, stop (not normal!).
+        if nonincreasing and (history[-1] - history[-3]) > tol:
+            return True
+        
+        # If the next value is close enough, stop.
+        if abs(history[-1] - history[-2]) < tol:
+            return True
+
+        # Otherwise, keep on going.
+        return False
 
     def entropy(self, X: torch.Tensor, min_one: bool = False) -> torch.Tensor:
         """Entropy function, :math:`E(X) = \langle X, \log X - 1 \rangle`.
@@ -343,7 +386,7 @@ class OTintNMF():
         """
         return -torch.logsumexp(Y, dim=0).sum()
 
-    def ot_dual_loss(self, A: torch.Tensor, K: torch.Tensor,
+    def ot_dual_loss(self, A: torch.Tensor, C: torch.Tensor,
                      Y: torch.Tensor) -> torch.Tensor:
         """The dual optimal transport loss. We omit the constant entropy term.
 
@@ -355,7 +398,7 @@ class OTintNMF():
         Returns:
             torch.Tensor: The dual optimal transport loss of Y.
         """
-        loss = torch.sum(A*torch.log(K@torch.exp(Y/self.eps)))
+        loss = contract('ki,ki->', A, torch.log(C@torch.exp(Y/self.eps)))
         return self.eps*loss
 
     def total_dual_loss(self) -> torch.Tensor:
@@ -374,7 +417,7 @@ class OTintNMF():
         # For each modality,
         for mod in modalities:
             # Add the OT dual loss.
-            loss -= self.ot_dual_loss(self.A[mod], self.K[mod], self.G[mod])
+            loss -= self.ot_dual_loss(self.A[mod], self.C[mod], self.G[mod])
 
             # Add the Lagranger multiplier term.
             loss += ((self.H[mod] @ self.W) * self.G[mod]).sum()
@@ -399,7 +442,7 @@ class OTintNMF():
         for mod in modalities:
             # OT dual loss term
             loss_h += self.ot_dual_loss(
-                self.A[mod], self.K[mod], self.G[mod])
+                self.A[mod], self.C[mod], self.G[mod])
             # Entropy dual loss term
             coef = self.rho_h
             loss_h -= coef*self.entropy_dual_loss(-self.G[mod]@self.W.T/coef)
@@ -417,7 +460,7 @@ class OTintNMF():
         for mod in modalities:
             htgw += self.H[mod].T@self.G[mod]
             loss_w += self.ot_dual_loss(
-                self.A[mod], self.K[mod], self.G[mod])
+                self.A[mod], self.C[mod], self.G[mod])
         coef = len(modalities)*self.rho_w
         loss_w -= coef*self.entropy_dual_loss(-htgw/coef)
         return loss_w
