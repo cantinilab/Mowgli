@@ -13,7 +13,7 @@ from sklearn.metrics import normalized_mutual_info_score as NMI
 from scipy.stats import pearsonr, spearmanr
 from sknetwork.topology import get_connected_components
 
-def umap(mdata: mu.MuData, obsm: str, n_neighbors: int = 15, metric: str = 'euclidean') -> None:
+def umap(mdata: mu.MuData, obsm: str, n_neighbors: int = 15, metric: str = 'euclidean', **kwds) -> None:
     """Compute UMAP of the given `obsm`.
 
     Args:
@@ -24,7 +24,7 @@ def umap(mdata: mu.MuData, obsm: str, n_neighbors: int = 15, metric: str = 'eucl
     """
     joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
     sc.pp.neighbors(joint_embedding, n_neighbors=n_neighbors, metric=metric)
-    sc.tl.umap(joint_embedding)
+    sc.tl.umap(joint_embedding, **kwds)
 
     mdata.obsm[obsm + '_umap'] = joint_embedding.obsm['X_umap']
 

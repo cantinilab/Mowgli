@@ -4,18 +4,12 @@ from torch import nn, optim
 import torch.nn.functional as F
 from sklearn.decomposition import PCA
 
-# Einops
-from opt_einsum import contract
-
 # Form cost matrices
 import numpy as np
 from scipy.spatial.distance import cdist
 
-# LazyTensor
-from pykeops.torch import LazyTensor
-
 # Typing
-from typing import List, Set, Dict, Tuple, Optional
+from typing import Iterable, List, Set, Dict, Tuple, Optional
 from typing import Callable, Iterator, Union, Optional, List
 
 # Biology
@@ -26,27 +20,34 @@ from tqdm import tqdm
 
 import matplotlib.pyplot as plt
 
+# TODO: make a fit, a transform and a fit_transform
+
 class OTintNMF():
-    """Integrative Nonnegative Matrix Factorization with an Optimal Transport loss.
+    
+    def __init__(
+        self, latent_dim: int = 15, rho_h: float = 1e-1, rho_w: float = 1e-1,
+        eps: float = 5e-2, cost: str = 'cosine', pca_cost: bool = False,
+        cost_path: dict = None, lazy: bool = False):
+        """Optimal Transport Integrative NMF.
 
-    Args:
-        latent_dim (int, optional): Dimension of latent space. Defaults to 15.
-        rho_h (float, optional): Entropic regularization parameter for :math:`H`. Defaults to 1e-1.
-        rho_w (float, optional): Entropic regularization parameter for :math:`W`. Defaults to 1e-1.
-        eps (float, optional): Entropic regularization parameter for the optimal transport loss. Defaults to 5e-2.
-        cost (str, optional): Distance function compatible with `scipy.spatial.distance.cdist`, used to compute an empirical cost between features. If a dictionary is passed, different functions can be used for each modality. Defaults to 'correlation'.
-        pca (bool, optional): If `True`, the cost is computed on a PCA embedding of the features, of size `latent_dim`. Defaults to False.
-    """
-
-    def __init__(self, latent_dim: int = 15, rho_h: float = 1e-1, rho_w: float = 1e-1,
-                 eps: float = 5e-2, cost: str = 'correlation', pca: bool = False,
-                 cost_path: dict = None):
+        Args:
+            latent_dim (int, optional): Latent dimension of the model. Defaults to 15.
+            rho_h (float, optional): Entropic regularization parameter for the disctionary. Defaults to 1e-1.
+            rho_w (float, optional): Entropic regularization parameter for the embeddings. Defaults to 1e-1.
+            eps (float, optional): Entropic regularization parameter for the Sinkhorn loss. Defaults to 5e-2.
+            cost (str, optional): Function to compute the ground cost matrix. Defaults to 'cosine'.
+            pca_cost (bool, optional): Whether to compute the ground cost on a PCA reduction instead of full data. Defaults to False.
+            cost_path (dict, optional): If specified, save the computed ground cost to this path. Ignored of `lazy` is set to True. Defaults to None.
+            lazy (bool, optional): Whether to compute the cost and loss lazily. This enables numerical stabilization. Defaults to False.
+        """        
 
         # Check that the user-defined parameters are valid.
         assert(latent_dim > 0)
         assert(rho_h > 0)
         assert(rho_w > 0)
         assert(eps > 0)
+        if lazy:
+            assert(cost=='cosine')
 
         # Save arguments as attributes.
         self.latent_dim = latent_dim
@@ -55,23 +56,139 @@ class OTintNMF():
         self.eps = eps
         self.cost = cost
         self.cost_path = cost_path
-        self.pca = pca
+        self.pca_cost = pca_cost
+        self.lazy = lazy
+
+        if lazy:
+            from pykeops.torch import LazyTensor
+            from einops import rearrange
 
         # Initialize the loss histories.
         self.losses_w, self.losses_h, self.losses = [], [], []
 
         # Initialize the dictionaries containing matrices for each omics.
-        self.A, self.H, self.G, self.C = {}, {}, {}, {}
+        self.A, self.H, self.G, self.C, self.K = {}, {}, {}, {}, {}
+    
+    def reference_dataset(self, X, dtype: torch.dtype, device: torch.device,
+        keep_idx: Iterable) -> torch.Tensor:
+        """Select features, transpose dataset and convert to Tensor.
 
-    def init_parameters(self, mdata: mu.MuData, dtype: torch.dtype,
-        device: torch.device, force_recompute: bool = False) -> None:
-        """Initialize parameters before optimization
+        Args:
+            X (array-like): The input data
+            dtype (torch.dtype): The dtype to create
+            device (torch.device): The device to create on
+            keep_idx (Iterable): The variables to keep.
+
+        Returns:
+            torch.Tensor: The reference dataset A.
+        """
+
+        # Keep only the highly variable features.
+        A = X[:, keep_idx].T
+
+        # If the dataset is sparse, make it dense.
+        try:
+            A = A.todense()
+        except:
+            pass
+
+        # Send the matrix `A` to PyTorch.
+        A = torch.from_numpy(A).to(device=device, dtype=dtype).contiguous()
+
+        # Assert that A is contiguous.
+        assert(A.is_contiguous())
+
+        return A
+    
+    def compute_ground_cost(self, features, cost: str,
+        force_recompute: bool, cost_path: str, dtype: torch.dtype,
+        device: torch.device) -> torch.Tensor:
+        """Compute the ground cost (not lazily!)
+
+        Args:
+            features (array-like): A array with the features to compute the cost on.
+            cost (str): The function to compute the cost. Scipy distances are allowed.
+            force_recompute (bool): Recompute even is there is already a cost matrix saved at the provided path.
+            cost_path (str): Where to look for or where to save the cost.
+            dtype (torch.dtype): The dtype for the output.
+            device (torch.device): The device for the ouput.
+
+        Returns:
+            torch.Tensor: The ground cost
+        """        
+
+        # Initialize the `recomputed variable`.
+        recomputed = False
+
+        # If we force recomputing, then compute the ground cost.
+        if force_recompute:
+            C = cdist(features, features, metric=cost)
+            recomputed = True
+
+        # If the cost is not yet computed, try to load it or compute it.
+        if not recomputed:
+            try:
+                C = np.load(cost_path)
+            except:
+                C = cdist(features, features, metric=cost)
+                recomputed = True
+
+        # If we did recompute the cost, save it.
+        if recomputed and self.cost_path:
+            np.save(cost_path, C)
+
+        C = torch.from_numpy(C).to(device=device, dtype=dtype)
+        C /= C.max()
+
+        # Compute the kernel K
+        return torch.exp(-C/self.eps).to(device=device, dtype=dtype)
+
+    def compute_lazy_ground_cost(self, features, cost: str,
+        dtype: torch.dtype, device: torch.device):
+        """Compute the ground cost (lazily!)
+
+        Args:
+            features ([type]): Array with the features to compute on.
+            cost (str): Function to compute with (only cosine for the moment)
+            dtype (torch.dtype): The dtype for the output
+            device (torch.device): The device for the output
+
+        Returns:
+            LazyTensor: The lazy ground cost
+        """        
+
+        assert(cost == 'cosine')
+        # TODO normalize by max
+
+        # We are computing a cosine ground cost, so normalize first.
+        X = torch.from_numpy(features).to(device=device, dtype=dtype)
+        X = X.T
+        X /= torch.norm(X, dim=0)
+        X = X.T
+        X = X.contiguous()
+
+        # Initialize the LazyTensors.
+        x_i = LazyTensor(rearrange(X, 'k d -> 1 k 1 d').contiguous())
+        x_j = LazyTensor(rearrange(X, 'k d -> 1 1 k d').contiguous())
+
+        # This is the cosine distance.
+        return 1 - (x_i * x_j).sum(dim=-1)
+
+
+    def init_parameters(
+        self, mdata: mu.MuData, dtype: torch.dtype,
+        device: torch.device, force_recompute=False) -> None:
+        """Initialize the parameters for the model
 
         Args:
             mdata (mu.MuData): Input dataset
-            dtype (torch.dtype): Data type (e.g. double)
-            device (torch.device): Device (e.g. cuda)
+            dtype (torch.dtype): Dtype for the output
+            device (torch.device): Device for the output
+            force_recompute (bool, optional): Where to recompute the cost even if there is a matrix precomputed. Defaults to False.
         """
+
+        # if not self.lazy:
+        #     assert(dtype == torch.double)
 
         # For each modality,
         for mod in mdata.mod:
@@ -79,118 +196,70 @@ class OTintNMF():
             ################ Generate the reference dataset A. ################
 
             # Select the highly variable features.
-            idx = mdata[mod].var['highly_variable'].to_numpy()
+            keep_idx = mdata[mod].var['highly_variable'].to_numpy()
 
-            # Keep only the highly variable features.
-            self.A[mod] = mdata[mod].X[:,idx]
+            # Make the reference dataset.
+            self.A[mod] = self.reference_dataset(
+                mdata[mod].X, dtype, device, keep_idx)
 
-            # If the dataset is sparse, make it dense.
-            try:
-                self.A[mod] = self.A[mod].todense()
-            except:
-                pass
-            
             ####################### Compute ground cost #######################
 
-            # If `pca`, then compute the ground cost on PCA embeddings.
-            if self.pca: 
-                pca = PCA(n_components=self.latent_dim)
-                X = pca.fit_transform(self.A[mod].T)
-            # Else, compute the cost on the transposed matrix.
-            else: 
-                X = 1e-6 + self.A[mod].T
-            
             # Use the specified cost function to compute ground cost.
             cost = self.cost if isinstance(self.cost, str) else self.cost[mod]
 
+            features = 1e-6 + self.A[mod].cpu().numpy()
+            if self.pca_cost:
+                pca = PCA(n_components=self.latent_dim)
+                features = pca.fit_transform(features)
+
+
             # If we want to use a lazy KeOps cost,
-            if cost == 'lazy':
-                # We are compute a cosine ground cost, so normalize first.
-                X = torch.from_numpy(X).to(device=device, dtype=dtype)
-                X = X.T
-                X /= torch.norm(X, dim=0)
-                X = X.T
-
-                # Initialize the LazyTensors.
-                x_i = LazyTensor(X[:,None,:])
-                x_j = LazyTensor(X[None,:,:])
-
-                # This is the cosine distance.
-                C_ij = 1 - (x_i * x_j).sum(dim=2)
-
-                # This is the cosien distance kernel.
-                self.C[mod] = (-C_ij/self.eps).exp()
+            if self.lazy:
+                self.C[mod] = self.compute_lazy_ground_cost(
+                    features, cost, dtype, device)
+            
             # Otherwise, compute a regular ground cost
             else:
-            
-                # Initialize the `recomputed variable`.
-                recomputed = False
+                self.K[mod] = self.compute_ground_cost(features, cost,
+                force_recompute, self.cost_path, dtype, device)
 
-                # If we force recomputing, then compute the ground cost.
-                if force_recompute:
-                    C = cdist(X, X, metric=cost)
-                    recomputed = True
-                
-                # If the cost is not yet computed, try to load it or compute it.
-                if not recomputed:
-                    try:
-                        C = np.load(self.cost_path[mod])
-                        recomputed = False
-                    except:
-                        C = cdist(X, X, metric=cost)
-                        recomputed = True
-                
-                # If we did recompute the cost, save it.
-                if recomputed and self.cost_path:
-                    np.save(self.cost_path[mod], C)
-                
-                # Normalize the cost with infinity norm.
-                C = torch.from_numpy(C).to(device=device, dtype=dtype)
-                C /= C.max()
-                
-                # self.C[mod] = C
+            ################# Normalize the reference dataset #################
 
-                # Compute the kernel K
-                self.C[mod] = torch.exp(-C/self.eps).to(device=device, dtype=dtype)
-
-
-            ######################## Normalize dataset ########################
-
-            # Add a small value for numerical stability, and normalize `A`.
-            self.A[mod] = 1e-6 + self.A[mod].T
+            # Add a small value for numerical stability, and normalize `A^T`.
+            self.A[mod] += 1e-6
             self.A[mod] /= self.A[mod].sum(0)
-
-            # Send the matrix `A` to PyTorch.
-            self.A[mod] = torch.from_numpy(self.A[mod]).to(
-                device=device, dtype=dtype)
 
             ####################### Initialize matrices #######################
 
             # Initialize the factor `H`.
-            n_vars = idx.sum()
+            n_vars = keep_idx.sum()
             self.H[mod] = torch.rand(
                 n_vars, self.latent_dim, device=device, dtype=dtype)
             self.H[mod] /= self.H[mod].sum(0)
 
+            # TODO maybe make G lazy!
+
             # Initialize the dual variable `G`
-            self.G[mod] = torch.rand(n_vars, mdata[mod].n_obs,
-                requires_grad=True, device=device, dtype=dtype)
+            self.G[mod] = torch.rand(
+                n_vars, mdata[mod].n_obs, requires_grad=True,
+                device=device, dtype=dtype)
 
         # Initialize the shared factor `W`
         self.W = torch.rand(
             self.latent_dim, mdata.n_obs, device=device, dtype=dtype)
         self.W /= self.W.sum(0)
 
-    def fit_transform(self, mdata: mu.MuData, max_iter_inner: int = 25,
-        max_iter: int = 25, device: torch.device = 'cpu', lr: float = 1,
-        dtype: torch.dtype = torch.float, tol_inner: float = 1e-9,
-        tol_outer: float = 1e-3, optim_name: str = "lbfgs") -> None:
+    def fit_transform(self, mdata: mu.MuData, max_iter_inner: int = 100,
+                      max_iter: int = 25, device: torch.device = 'cpu',
+                      lr: float = 1, dtype: torch.dtype = torch.float,
+                      tol_inner: float = 1e-9, tol_outer: float = 1e-3,
+                      optim_name: str = "lbfgs") -> None:
         """Fit the model to the input multiomics dataset, and add the learned
         factors to the Muon object.
 
         Args:
             mdata (mu.MuData): Input dataset
-            max_iter_inner (int, optional): Maximum number of iterations for the inner loop. Defaults to 25.
+            max_iter_inner (int, optional): Maximum number of iterations for the inner loop. Defaults to 100.
             max_iter (int, optional): Maximum number of iterations for the outer loop. Defaults to 25.
             device (torch.device, optional): Device to do computations on. Defaults to 'cpu'.
             lr (float, optional): Learning rate. Defaults to 1e-2.
@@ -220,15 +289,16 @@ class OTintNMF():
 
             # Optimize the dual variable `G`.
             self.optimize(optimizer=optimizer, loss_fn=self.loss_fn_w,
-                max_iter=max_iter_inner, history=self.losses_w,
-                tol=tol_inner, pbar=pbar)
+                          max_iter=max_iter_inner, history=self.losses_w,
+                          tol=tol_inner, pbar=pbar, device=device)
             
             # Update the shared factor `W`.
-            htgw = 0
-            for mod in mdata.mod:
-                htgw += self.H[mod].T@self.G[mod]/len(mdata.mod)
-            self.W = F.softmin(htgw/self.rho_w, dim=0).detach()
-            
+            with torch.no_grad():
+                htgw = 0
+                for mod in mdata.mod:
+                    htgw += self.H[mod].T@self.G[mod]/len(mdata.mod)
+                self.W = F.softmin(htgw/self.rho_w, dim=0)
+
             # Update the progress bar.
             pbar.update(1)
 
@@ -239,14 +309,14 @@ class OTintNMF():
 
             # Optimize the dual variable `G`.
             self.optimize(optimizer=optimizer, loss_fn=self.loss_fn_h,
-                max_iter=max_iter_inner, history=self.losses_h,
-                tol=tol_inner, pbar=pbar)
-            
+                          max_iter=max_iter_inner, history=self.losses_h,
+                          tol=tol_inner, pbar=pbar, device=device)
+
             # Update the omic specific factors `H[mod]`.
-            for mod in mdata.mod:
-                self.H[mod] = F.softmin(
-                    self.G[mod]@self.W.T/self.rho_h, dim=0).detach()
-            
+            with torch.no_grad():
+                for mod in mdata.mod:
+                    self.H[mod] = F.softmin(self.G[mod]@self.W.T/self.rho_h, dim=0)
+
             # Update the progress bar.
             pbar.update(1)
 
@@ -281,7 +351,7 @@ class OTintNMF():
             return optim.Adam(params, lr=lr)
 
     def optimize(self, optimizer: torch.optim.Optimizer, loss_fn: Callable,
-                 max_iter: int, history: List, tol: float, pbar: None) -> None:
+                 max_iter: int, history: List, tol: float, pbar: None, device: str) -> None:
         """Optimize the dual variable based on the provided loss function
 
         Args:
@@ -298,7 +368,7 @@ class OTintNMF():
 
         # This is the main optimization loop.
         for i in range(max_iter):
-            
+
             # Define the closure function required by the optimizer.
             def closure():
                 optimizer.zero_grad()
@@ -307,24 +377,28 @@ class OTintNMF():
                 return loss
 
             # Add a value to the loss history.
-            history.append(closure().detach())
+            with torch.no_grad():
+                history.append(loss_fn())
 
             # Perform an optimization step.
             optimizer.step(closure)
 
-            # Every 10 steps, update the progress bar.
-            if i % 10 == 0:
+            # Every step, update the progress bar.
+            if i % 1 == 0:
                 pbar.set_postfix({
                     'loss': total_loss,
-                    'loss_inner': history[-1].cpu().numpy()
+                    'loss_inner': history[-1].cpu().numpy(),
+                    'inner_steps': i,
+                    'gpu_memory_allocated': torch.cuda.memory_allocated(device=device)
                 })
 
             # Attempt early stopping
             if self.early_stop(history, tol):
                 break
-    
+
+    @torch.no_grad()
     def early_stop(self, history: List, tol: float, nonincreasing: bool = False) -> bool:
-        """Check if the early soptting criterion is valid
+        """Check if the early stopping criterion is valid
 
         Args:
             history (List): The history of values to check.
@@ -333,18 +407,18 @@ class OTintNMF():
         Returns:
             bool: Whether one can stop early
         """
-        # If we have a nan or infinite, return early.
-        if not torch.isfinite(history[-1]):
-            return True
-        
+        # If we have a nan or infinite, die.
+        if len(history) > 0 and not torch.isfinite(history[-1]):
+            raise ValueError('Error: Loss is not finite!')
+
         # If the history is too short, continue.
         if len(history) < 3:
             return False
-        
+
         # If the next value is worse, stop (not normal!).
         if nonincreasing and (history[-1] - history[-3]) > tol:
             return True
-        
+
         # If the next value is close enough, stop.
         if abs(history[-1] - history[-2]) < tol:
             return True
@@ -352,6 +426,7 @@ class OTintNMF():
         # Otherwise, keep on going.
         return False
 
+    @torch.no_grad()
     def entropy(self, X: torch.Tensor, min_one: bool = False) -> torch.Tensor:
         """Entropy function, :math:`E(X) = \langle X, \log X - 1 \rangle`.
 
@@ -363,8 +438,6 @@ class OTintNMF():
             torch.Tensor:  The entropy of X.
         """
 
-        # TODO: KL div can take log input as well! see log_softmax ?
-
         if min_one:
             # return -torch.nan_to_num(X*(X.log()-1)).sum()
             return F.kl_div(torch.ones_like(X), X, reduction='sum')
@@ -374,7 +447,7 @@ class OTintNMF():
 
     def entropy_dual_loss(self, Y: torch.Tensor) -> torch.Tensor:
         """The dual of the entropy function.
-        
+
         Implies a simplex constraint for the entropy,
         and no -1 in its expression!
 
@@ -386,8 +459,7 @@ class OTintNMF():
         """
         return -torch.logsumexp(Y, dim=0).sum()
 
-    def ot_dual_loss(self, A: torch.Tensor, C: torch.Tensor,
-                     Y: torch.Tensor) -> torch.Tensor:
+    def ot_dual_loss(self, mod: str) -> torch.Tensor:
         """The dual optimal transport loss. We omit the constant entropy term.
 
         Args:
@@ -398,9 +470,25 @@ class OTintNMF():
         Returns:
             torch.Tensor: The dual optimal transport loss of Y.
         """
-        loss = contract('ki,ki->', A, torch.log(C@torch.exp(Y/self.eps)))
+
+        if self.lazy:
+            # Create a LazyTensor of G
+            G_il = LazyTensor(
+                rearrange(self.G[mod], 'k i -> i 1 k 1').contiguous())
+
+            # Compute the stabilized product.
+            prod = (-self.C[mod]/self.eps + G_il/self.eps).logsumexp(dim=2)
+            prod = rearrange(prod, 'i k 1 -> k i')
+        else:
+            # Compute the non stabilized product.
+            prod = torch.log(self.K[mod]@torch.exp(self.G[mod]/self.eps))
+
+        # Compute the dot product with A.
+        loss = torch.sum(self.A[mod]*prod)
+        
         return self.eps*loss
 
+    @torch.no_grad()
     def total_dual_loss(self) -> torch.Tensor:
         """Compute total dual loss
 
@@ -416,21 +504,22 @@ class OTintNMF():
 
         # For each modality,
         for mod in modalities:
-            # Add the OT dual loss.
-            loss -= self.ot_dual_loss(self.A[mod], self.C[mod], self.G[mod])
 
-            # Add the Lagranger multiplier term.
+            # Add the OT dual loss.
+            loss -= self.ot_dual_loss(mod)
+
+            # Add the Lagrange multiplier term.
             loss += ((self.H[mod] @ self.W) * self.G[mod]).sum()
 
             # Add the `H[mod]` entropy term.
             loss -= self.rho_h*self.entropy(self.H[mod])
-        
+
         # Add the `W` entropy term.
         loss -= len(modalities)*self.rho_w*self.entropy(self.W)
 
         # Return the full loss.
-        return loss.detach()
-    
+        return loss/self.W.shape[1]
+
     def loss_fn_h(self) -> torch.Tensor:
         """The loss for the optimization of :math:`H`
 
@@ -440,13 +529,15 @@ class OTintNMF():
         loss_h = 0
         modalities = self.A.keys()
         for mod in modalities:
+            n = self.A[mod].shape[1]
+
             # OT dual loss term
-            loss_h += self.ot_dual_loss(
-                self.A[mod], self.C[mod], self.G[mod])
+            loss_h += self.ot_dual_loss(mod)
+            
             # Entropy dual loss term
             coef = self.rho_h
             loss_h -= coef*self.entropy_dual_loss(-self.G[mod]@self.W.T/coef)
-        return loss_h
+        return loss_h/n
 
     def loss_fn_w(self) -> torch.Tensor:
         """Return the loss for the optimization of W
@@ -458,9 +549,17 @@ class OTintNMF():
         htgw = 0
         modalities = self.A.keys()
         for mod in modalities:
+            n = self.A[mod].shape[1]
+
+            # For the entropy dual loss term.
             htgw += self.H[mod].T@self.G[mod]
-            loss_w += self.ot_dual_loss(
-                self.A[mod], self.C[mod], self.G[mod])
+
+            # OT dual loss term.
+            loss_w += self.ot_dual_loss(mod)
+        
+        # Entropy dual loss term.
         coef = len(modalities)*self.rho_w
         loss_w -= coef*self.entropy_dual_loss(-htgw/coef)
-        return loss_w
+
+        # Return the loss.
+        return loss_w/n
