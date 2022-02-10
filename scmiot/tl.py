@@ -1,5 +1,5 @@
 # Biology
-from typing import Iterable, List, Tuple
+from typing import Dict, Iterable, List, Tuple
 import scanpy as sc
 import muon as mu
 import anndata as ad
@@ -12,6 +12,8 @@ from sklearn.metrics import adjusted_rand_score as ARI
 from sklearn.metrics import normalized_mutual_info_score as NMI
 from scipy.stats import pearsonr, spearmanr
 from sknetwork.topology import get_connected_components
+import torch.nn.functional as F
+import torch
 
 def umap(mdata: mu.MuData, obsm: str, n_neighbors: int = 15, metric: str = 'euclidean', **kwds) -> None:
     """Compute UMAP of the given `obsm`.
@@ -399,3 +401,22 @@ def enrich(mdata: mu.MuData, mod: str = 'rna', uns: str = 'H_OT', n_genes: int =
 
     # Return the results of the queries and the average best p_value.
     return enr, mean_best_p
+
+def k_metric(model) -> Dict:
+    """Return metrics useful to evaluate the choice of latent dimension k.
+    - total dual loss
+
+    Args:
+        model : The trained model to evaluate k on.
+
+    Returns:
+        Dict: A dictionary containing the metrics.
+    """    
+    k_metrics = {}
+    k_metrics['ot_loss'] = 0
+    k_metrics['entropy_h'] = 0
+    for mod in model.A.keys():
+        k_metrics['ot_loss'] += float(model.ot_dual_loss(mod).cpu())
+        k_metrics['entropy_h'] += -torch.nan_to_num(model.H[mod]*model.H[mod].log()).sum()
+    k_metrics['entropy_w'] = -torch.nan_to_num(model.W*model.W.log()).sum()
+    return k_metrics

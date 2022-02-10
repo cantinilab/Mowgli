@@ -27,7 +27,7 @@ class OTintNMF():
     def __init__(
         self, latent_dim: int = 15, rho_h: float = 1e-1, rho_w: float = 1e-1,
         eps: float = 5e-2, cost: str = 'cosine', pca_cost: bool = False,
-        cost_path: dict = None, lazy: bool = False):
+        cost_path: dict = None):
         """Optimal Transport Integrative NMF.
 
         Args:
@@ -37,8 +37,7 @@ class OTintNMF():
             eps (float, optional): Entropic regularization parameter for the Sinkhorn loss. Defaults to 5e-2.
             cost (str, optional): Function to compute the ground cost matrix. Defaults to 'cosine'.
             pca_cost (bool, optional): Whether to compute the ground cost on a PCA reduction instead of full data. Defaults to False.
-            cost_path (dict, optional): If specified, save the computed ground cost to this path. Ignored of `lazy` is set to True. Defaults to None.
-            lazy (bool, optional): Whether to compute the cost and loss lazily. This enables numerical stabilization. Defaults to False.
+            cost_path (dict, optional): If specified, save the computed ground cost to this path. Defaults to None.
         """        
 
         # Check that the user-defined parameters are valid.
@@ -46,8 +45,6 @@ class OTintNMF():
         assert(rho_h > 0)
         assert(rho_w > 0)
         assert(eps > 0)
-        if lazy:
-            assert(cost=='cosine')
 
         # Save arguments as attributes.
         self.latent_dim = latent_dim
@@ -57,11 +54,6 @@ class OTintNMF():
         self.cost = cost
         self.cost_path = cost_path
         self.pca_cost = pca_cost
-        self.lazy = lazy
-
-        if lazy:
-            from pykeops.torch import LazyTensor
-            from einops import rearrange
 
         # Initialize the loss histories.
         self.losses_w, self.losses_h, self.losses = [], [], []
@@ -143,28 +135,28 @@ class OTintNMF():
         # Compute the kernel K
         return torch.exp(-C/self.eps).to(device=device, dtype=dtype)
 
+
     def compute_lazy_ground_cost(self, features, cost: str,
         dtype: torch.dtype, device: torch.device):
-        """Compute the ground cost (lazily!)
+        """PRINT DEPRECTATED. Compute the ground cost (lazily!)
 
         Args:
             features ([type]): Array with the features to compute on.
-            cost (str): Function to compute with (only cosine for the moment)
+            cost (str): Function to compute with (only sqeuclidean for the moment)
             dtype (torch.dtype): The dtype for the output
             device (torch.device): The device for the output
 
         Returns:
             LazyTensor: The lazy ground cost
-        """        
+        """
 
-        assert(cost == 'cosine')
+        print('DEPRECATED')
+
+        assert(cost == 'sqeuclidean')
         # TODO normalize by max
 
         # We are computing a cosine ground cost, so normalize first.
         X = torch.from_numpy(features).to(device=device, dtype=dtype)
-        X = X.T
-        X /= torch.norm(X, dim=0)
-        X = X.T
         X = X.contiguous()
 
         # Initialize the LazyTensors.
@@ -172,7 +164,41 @@ class OTintNMF():
         x_j = LazyTensor(rearrange(X, 'k d -> 1 1 k d').contiguous())
 
         # This is the cosine distance.
-        return 1 - (x_i * x_j).sum(dim=-1)
+        return ((x_i - x_j)**2).sum(dim=-1)
+
+    def update_latent_dim(self, latent_dim: int) -> None:
+        """Change the latent dimension. This allows you to keep the
+        previous dual variable as a good initialization for the new
+        optimization.
+
+        Args:
+            latent_dim (int): The new latent_dimension.
+        """
+
+        assert(latent_dim > 0)
+
+        self.latent_dim = latent_dim
+
+        # Initialize the factor `H`.
+        for mod in self.H.keys():
+            # Get the dimensions, device and dtype for H.
+            n_var = self.H[mod].shape[0]
+            device = self.H[mod].device
+            dtype = self.H[mod].dtype
+
+            # Create a new random H.
+            self.H[mod] = torch.rand(
+                n_var, self.latent_dim, device=device, dtype=dtype)
+            
+            # Normaize H.
+            self.H[mod] /= self.H[mod].sum(0)
+
+        # Initialize the shared factor `W`.
+        self.W = torch.rand(
+            self.latent_dim, self.W.shape[1], device=device, dtype=dtype)
+        
+        # Normalize W.
+        self.W /= self.W.sum(0)
 
 
     def init_parameters(
@@ -186,9 +212,6 @@ class OTintNMF():
             device (torch.device): Device for the output
             force_recompute (bool, optional): Where to recompute the cost even if there is a matrix precomputed. Defaults to False.
         """
-
-        # if not self.lazy:
-        #     assert(dtype == torch.double)
 
         # For each modality,
         for mod in mdata.mod:
@@ -212,16 +235,9 @@ class OTintNMF():
                 pca = PCA(n_components=self.latent_dim)
                 features = pca.fit_transform(features)
 
-
-            # If we want to use a lazy KeOps cost,
-            if self.lazy:
-                self.C[mod] = self.compute_lazy_ground_cost(
-                    features, cost, dtype, device)
-            
-            # Otherwise, compute a regular ground cost
-            else:
-                self.K[mod] = self.compute_ground_cost(features, cost,
-                force_recompute, self.cost_path, dtype, device)
+            self.K[mod] = self.compute_ground_cost(
+                features, cost, force_recompute,
+                self.cost_path, dtype, device)
 
             ################# Normalize the reference dataset #################
 
@@ -236,8 +252,6 @@ class OTintNMF():
             self.H[mod] = torch.rand(
                 n_vars, self.latent_dim, device=device, dtype=dtype)
             self.H[mod] /= self.H[mod].sum(0)
-
-            # TODO maybe make G lazy!
 
             # Initialize the dual variable `G`
             self.G[mod] = torch.rand(
@@ -439,11 +453,9 @@ class OTintNMF():
         """
 
         if min_one:
-            # return -torch.nan_to_num(X*(X.log()-1)).sum()
-            return F.kl_div(torch.ones_like(X), X, reduction='sum')
+            return -torch.nan_to_num(X*(X.log()-1)).sum()
         else:
-            # return -torch.nan_to_num(X*X.log()).sum()
-            return F.kl_div(torch.zeros_like(X), X, reduction='sum')
+            return -torch.nan_to_num(X*X.log()).sum()
 
     def entropy_dual_loss(self, Y: torch.Tensor) -> torch.Tensor:
         """The dual of the entropy function.
@@ -471,17 +483,9 @@ class OTintNMF():
             torch.Tensor: The dual optimal transport loss of Y.
         """
 
-        if self.lazy:
-            # Create a LazyTensor of G
-            G_il = LazyTensor(
-                rearrange(self.G[mod], 'k i -> i 1 k 1').contiguous())
-
-            # Compute the stabilized product.
-            prod = (-self.C[mod]/self.eps + G_il/self.eps).logsumexp(dim=2)
-            prod = rearrange(prod, 'i k 1 -> k i')
-        else:
-            # Compute the non stabilized product.
-            prod = torch.log(self.K[mod]@torch.exp(self.G[mod]/self.eps))
+        # Compute the non stabilized product.
+        scale = torch.max(self.G[mod], dim=0)[0]/self.eps
+        prod = torch.log(self.K[mod]@torch.exp(self.G[mod]/self.eps - scale)) + scale
 
         # Compute the dot product with A.
         loss = torch.sum(self.A[mod]*prod)
@@ -495,6 +499,8 @@ class OTintNMF():
         Returns:
             torch.Tensor: The loss
         """
+
+        # TODO: add constantsssss
 
         # Initialize the loss to zero.
         loss = 0
