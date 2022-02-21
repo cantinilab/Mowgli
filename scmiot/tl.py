@@ -47,7 +47,7 @@ def umap(
         metric (str, optional): Which metric to compute neighbors. Defaults to 'euclidean'.
     """
     joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
-    sc.pp.neighbors(joint_embedding, n_neighbors=n_neighbors, metric=metric)
+    sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors, metric=metric)
     sc.tl.umap(joint_embedding, **kwds)
 
     mdata.obsm[obsm + '_umap'] = joint_embedding.obsm['X_umap']
