@@ -1,21 +1,43 @@
-# Biology
-from typing import Dict, Iterable, List, Tuple
+################################### IMPORTS ###################################
+
+# Biology imports.
 import scanpy as sc
 import muon as mu
 import anndata as ad
-from sklearn.metrics import r2_score, explained_variance_score, silhouette_score
+
+# Typing imports.
+from typing import Dict, Iterable, List, Tuple
+
+# Plotting imports.
 import matplotlib.pyplot as plt
+
+# Matrix operations.
 import numpy as np
-from scipy.spatial.distance import cdist
-from tqdm import tqdm
-from sklearn.metrics import adjusted_rand_score as ARI
-from sklearn.metrics import normalized_mutual_info_score as NMI
-from scipy.stats import pearsonr, spearmanr
-from sknetwork.topology import get_connected_components
 import torch.nn.functional as F
 import torch
 
-def umap(mdata: mu.MuData, obsm: str, n_neighbors: int = 15, metric: str = 'euclidean', **kwds) -> None:
+# Statistics.
+from sklearn.metrics import r2_score, explained_variance_score
+from sklearn.metrics import silhouette_score
+from sklearn.metrics import adjusted_rand_score as ARI
+from sklearn.metrics import normalized_mutual_info_score as NMI
+from scipy.stats import pearsonr, spearmanr
+
+# Pretty progress bars.
+from tqdm import tqdm
+
+# Distance functions.
+from scipy.spatial.distance import cdist
+from scipy.spatial.distance import jensenshannon
+
+# Networks.
+from sknetwork.topology import get_connected_components
+
+################################## EMBEDDING ##################################
+
+def umap(
+    mdata: mu.MuData, obsm: str, n_neighbors: int = 15,
+    metric: str = 'euclidean', **kwds) -> None:
     """Compute UMAP of the given `obsm`.
 
     Args:
@@ -29,6 +51,19 @@ def umap(mdata: mu.MuData, obsm: str, n_neighbors: int = 15, metric: str = 'eucl
     sc.tl.umap(joint_embedding, **kwds)
 
     mdata.obsm[obsm + '_umap'] = joint_embedding.obsm['X_umap']
+
+################################## CLUSTERING #################################
+
+def leiden(mdata, n_neighbors=15, obsm='W_OT', resolution=1):
+    try:
+        joint_embedding = ad.AnnData(mdata.obsm[obsm].cpu().numpy(), obs=mdata.obs)
+    except:
+        joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
+    sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors)
+    sc.tl.leiden(joint_embedding, resolution=resolution)
+    mdata.obs['leiden'] = joint_embedding.obs['leiden']
+
+############################## EVALUATE EMBEDDING #############################
 
 def sil_score(mdata: mu.MuData, obsm: str, obs: str) -> float:
     """Compute silhouette score of an embedding
@@ -62,55 +97,52 @@ def knn_score(mdata: mu.MuData, obs: str, obsm: str = 'W_OT', max_neighbors: int
         s += np.cumsum(np.array(mdata.obs[obs][i] == mdata.obs[obs][idx]))/np.arange(1, max_neighbors)
     return s / mdata.n_obs
 
-def leiden_multi(mdata: mu.MuData, n_neighbors: int = 15,
-                obsm: str = 'W_OT', obs: str = 'rna:celltype',
-                resolutions: Iterable[float] = np.arange(.1, 2.1, .1)):
-    """Compute leiden clustering for multiple resultions, and return ARI and NMI.
+def graph_connectivity(mdata: mu.MuData, obs: str, obsm: str,
+                      n_neighbors: int = 15) -> float:
+    """Compute graph connectivity score, as defined in OpenProblems.
 
     Args:
-        mdata (mu.MuData): Input data.
+        mdata (mu.MuData): Input data
+        obs (str): Observation key
+        obsm (str): Obsm key
         n_neighbors (int, optional): Number of neighbors. Defaults to 15.
-        obsm (str, optional): Obsm to use. Defaults to 'W_OT'.
-        obs (str, optional): Annotation. Defaults to 'rna:celltype'.
-        resolutions (Iterable[float], optional): Iterable of resultions. Defaults to np.arange(.1, 2.1, .1).
 
     Returns:
-        [type]: [description]
-    """    
+        float: graph connectivity score
+    """
+    # Represent the joint embedding as an AnnData object.
     joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
-    aris, nmis = [], []
-    sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors)
-    for resolution in tqdm(resolutions):
-        sc.tl.leiden(joint_embedding, resolution=resolution)
-        aris.append(ARI(joint_embedding.obs['leiden'], mdata.obs[obs]))
-        nmis.append(NMI(joint_embedding.obs['leiden'], mdata.obs[obs]))
-    return resolutions, aris, nmis
 
-def leiden_multi_silhouette(mdata: mu.MuData, n_neighbors: int = 15,
-                obsm: str = 'W_OT', obs: str = 'rna:celltype',
-                resolutions: Iterable[float] = np.arange(.1, 2.1, .1)):
-    """Compute leiden clustering for multiple resultions, and return ARI and NMI.
+    # Find the joint embedding's neighbors.
+    sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=15)
 
-    Args:
-        mdata (mu.MuData): Input data.
-        n_neighbors (int, optional): Number of neighbors. Defaults to 15.
-        obsm (str, optional): Obsm to use. Defaults to 'W_OT'.
-        obs (str, optional): Annotation. Defaults to 'rna:celltype'.
-        resolutions (Iterable[float], optional): Iterable of resultions. Defaults to np.arange(.1, 2.1, .1).
+    # Define the adjacency matrix
+    adjacency = joint_embedding.obsp['distances']
 
-    Returns:
-        [type]: [description]
-    """    
-    joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
-    sils = []
-    sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors)
-    for resolution in tqdm(resolutions):
-        sc.tl.leiden(joint_embedding, resolution=resolution)
-        if len(np.unique(joint_embedding.obs['leiden'])) > 1:
-            sils.append(silhouette_score(joint_embedding.X, joint_embedding.obs['leiden']))
-        else:
-            sils.append(-1)
-    return resolutions, sils
+    # Initialize the proportions
+    props = []
+
+    # For all unique obsevervation categories,
+    for celltype in np.unique(mdata.obs[obs]):
+
+        # Define the indices of cells concerned.
+        idx = np.where(mdata.obs[obs] == celltype)[0]
+
+        try:
+            # Find the connected components in the category's subgraph.
+            conn_comp = get_connected_components(adjacency[idx][:,idx], connection='strong')
+
+            # Count the occurences of the components.
+            _, counts = np.unique(conn_comp, return_counts=True)
+
+            # The proportion is the largest component over the number of cells in the cluster.
+            props.append(counts.max() / idx.shape[0])
+        except:
+            props.append(0)
+            print('Warning: empty component')
+
+    # Return average of the proportions.
+    return np.array(props).mean()
 
 def predict_features_corr(mdata: mu.MuData, mod: str, n_neighbors: int,
                         features_idx: Iterable[int] = [],
@@ -175,188 +207,84 @@ def predict_features_corr(mdata: mu.MuData, mod: str, n_neighbors: int,
     
     return pearson, spearman
 
-def variance_explained(mdata, score_function='explained_variance_score', plot=True):
-    """experimental, i have to test this function"""
-    if score_function == 'explained_variance_score':
-        f_score = explained_variance_score
-    elif score_function == 'r2_score':
-        f_score = r2_score
-    else:
-        f_score = explained_variance_score
-        print('function not recognized, defaulting to explained_variance_score')
-    score = []
-    k = mdata.obsm['W_OT'].shape[1]
-    for mod in mdata.mod:
-        score.append([])
-        A = mdata.mod[mod].uns['H_OT'] @ mdata.obsm['W_OT'].T
-        A = A.cpu().numpy()
-
-        for i in range(k):
-            rec = mdata.mod[mod].uns['H_OT'][:,[i]] @ mdata.obsm['W_OT'][:,[i]].T
-            rec = rec.cpu().numpy()
-            score[-1].append(f_score(A, rec))
-
-    if plot:
-        fig, ax = plt.subplots()
-        plt.imshow(score, aspect='auto', interpolation='none')
-        ax.set_xticks(range(k))
-        ax.set_xlabel('Dimensions')
-        ax.set_ylabel('Modality')
-        ax.set_yticks(range(len(mdata.mod)))
-        ax.set_title('Variance explained')
-        ax.set_yticklabels(mdata.mod.keys())
-        plt.colorbar()
-        plt.show()
-    return score
-
-def graph_connectivity(mdata: mu.MuData, obs: str, obsm: str,
-                      n_neighbors: int = 15) -> float:
-    """Compute graph connectivity score, as defined in OpenProblems.
+def leiden_multi(mdata: mu.MuData, n_neighbors: int = 15,
+                obsm: str = 'W_OT', obs: str = 'rna:celltype',
+                resolutions: Iterable[float] = np.arange(.1, 2.1, .1)):
+    """Compute leiden clustering for multiple resultions, and return ARI and NMI.
 
     Args:
-        mdata (mu.MuData): Input data
-        obs (str): Observation key
-        obsm (str): Obsm key
+        mdata (mu.MuData): Input data.
         n_neighbors (int, optional): Number of neighbors. Defaults to 15.
+        obsm (str, optional): Obsm to use. Defaults to 'W_OT'.
+        obs (str, optional): Annotation. Defaults to 'rna:celltype'.
+        resolutions (Iterable[float], optional): Iterable of resultions. Defaults to np.arange(.1, 2.1, .1).
 
     Returns:
-        float: graph connectivity score
-    """
-    # Represent the joint embedding as an AnnData object.
+        [type]: [description]
+    """    
     joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
-
-    # Find the joint embedding's neighbors.
-    sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=15)
-
-    # Define the adjacency matrix
-    adjacency = joint_embedding.obsp['distances']
-
-    # Initialize the proportions
-    props = []
-
-    # For all unique obsevervation categories,
-    for celltype in np.unique(mdata.obs[obs]):
-
-        # Define the indices of cells concerned.
-        idx = np.where(mdata.obs[obs] == celltype)[0]
-
-        try:
-            # Find the connected components in the category's subgraph.
-            conn_comp = get_connected_components(adjacency[idx][:,idx], connection='strong')
-
-            # Count the occurences of the components.
-            _, counts = np.unique(conn_comp, return_counts=True)
-
-            # The proportion is the largest component over the number of cells in the cluster.
-            props.append(counts.max() / idx.shape[0])
-        except:
-            props.append(0)
-            print('Warning: empty component')
-
-    # Return average of the proportions.
-    return np.array(props).mean()
-
-# def leiden_multi_obsp(mdata, n_neighbors=15, neighbors_key='wnn', obs='rna:celltype', resolutions=10.**np.linspace(-2, 1, 20)):
-#     aris = []
-#     nmis = []
-#     for resolution in tqdm(resolutions):
-#         sc.tl.leiden(mdata, resolution=resolution, neighbors_key=neighbors_key, key_added='leiden_' + neighbors_key)
-#         aris.append(ARI(mdata.obs['leiden_' + neighbors_key], mdata.obs[obs]))
-#         nmis.append(NMI(mdata.obs['leiden_' + neighbors_key], mdata.obs[obs]))
-#     return resolutions, aris, nmis
-
-def leiden(mdata, n_neighbors=15, obsm='W_OT', resolution=1):
-    try:
-        joint_embedding = ad.AnnData(mdata.obsm[obsm].cpu().numpy(), obs=mdata.obs)
-    except:
-        joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
+    aris, nmis = [], []
     sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors)
-    sc.tl.leiden(joint_embedding, resolution=resolution)
-    mdata.obs['leiden'] = joint_embedding.obs['leiden']
+    for resolution in tqdm(resolutions):
+        sc.tl.leiden(joint_embedding, resolution=resolution)
+        aris.append(ARI(joint_embedding.obs['leiden'], mdata.obs[obs]))
+        nmis.append(NMI(joint_embedding.obs['leiden'], mdata.obs[obs]))
+    return resolutions, aris, nmis
 
-def inflexion_pt(a):
-    second_derivative = [-np.inf]
-    for i in range(1, len(a) - 1):
-        second_derivative.append(a[i+1] + a[i-1] - 2 * a[i])
-    return np.argmax(second_derivative)
+def leiden_multi_silhouette(mdata: mu.MuData, n_neighbors: int = 15,
+                obsm: str = 'W_OT', obs: str = 'rna:celltype',
+                resolutions: Iterable[float] = np.arange(.1, 2.1, .1)):
+    """Compute leiden clustering for multiple resultions, and return ARI and NMI.
 
-def select_dimensions(mdata, plot=True):
-    latent_dim = mdata.obsm['W_OT'].shape[1]
-    s = np.zeros(latent_dim)
-    for mod in mdata.mod:
-        s += np.array([(mdata[mod].uns['H_OT'][:,[k]] @ mdata.obsm['W_OT'].T[[k]]).std(1).sum() for k in range(latent_dim)])
+    Args:
+        mdata (mu.MuData): Input data.
+        n_neighbors (int, optional): Number of neighbors. Defaults to 15.
+        obsm (str, optional): Obsm to use. Defaults to 'W_OT'.
+        obs (str, optional): Annotation. Defaults to 'rna:celltype'.
+        resolutions (Iterable[float], optional): Iterable of resultions. Defaults to np.arange(.1, 2.1, .1).
 
-    i = inflexion_pt(np.sort(s)[::-1])
-    i = max(i, 4)
-    if plot:
-        plt.plot(np.sort(s)[::-1])
-        plt.scatter(range(latent_dim), np.sort(s)[::-1])
-        plt.scatter(range(i+1), np.sort(s)[::-1][:i+1])
-        plt.plot(np.sort(s)[::-1][:i+1])
-        plt.show()
-    return np.argsort(s)[::-1][:i+1].copy()
-
-def trim_dimensions(mdata, dims):
-    mdata.obsm['W_OT'] = mdata.obsm['W_OT'][:,dims]
-    for mod in mdata.mod:
-        mdata[mod].uns['H_OT'] = mdata[mod].uns['H_OT'][:,dims]
-
-def best_leiden_resolution(mdata, obsm='W_OT', method='elbow', resolution_range=None, n_neighbors=15, plot=True):
-    if resolution_range==None:
-        resolution_range = 10.**np.linspace(-2, 1, 20)
-
-    if method != 'elbow' and method != 'silhouette':
-        print('method not recognized, defaulting to elbow')
-        method = 'elbow'
-
-    joint_embedding = ad.AnnData(mdata.obsm[obsm].cpu().numpy(), obs=mdata.obs)
+    Returns:
+        [type]: [description]
+    """    
+    joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
+    sils = []
     sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors)
+    for resolution in tqdm(resolutions):
+        sc.tl.leiden(joint_embedding, resolution=resolution)
+        if len(np.unique(joint_embedding.obs['leiden'])) > 1:
+            sils.append(silhouette_score(joint_embedding.X, joint_embedding.obs['leiden']))
+        else:
+            sils.append(-1)
+    return resolutions, sils
 
-    if method == 'elbow':
-        vars = []
-        for res in resolution_range:
-            sc.tl.leiden(joint_embedding, resolution=res)
-            wss = []
-            for cat in joint_embedding.obs['leiden'].unique():
-                wss.append(joint_embedding.X[joint_embedding.obs['leiden'] == cat].std(0).sum())
-            vars.append(np.mean(wss))
+############################### ANALYSE FACTORS ###############################
 
-        i = inflexion_pt(vars)
-        if plot:
-            plt.xscale('log')
-            plt.scatter(resolution_range, vars)
-            plt.scatter(resolution_range[i], vars[i])
-            plt.plot(resolution_range, vars)
-            plt.ylabel('Average intra-cluster variation')
-            plt.xlabel('Resolution')
-            plt.show()
+def top_features(
+    mdata: mu.MuData, mod: str = 'rna', uns: str = 'H_OT',
+    dim: int = 0, n_features: int = 5) -> Iterable:
+    """Returns the top features for a given modality and latent dimension.
 
-        return resolution_range[i]
+    Args:
+        mdata (mu.MuData): The input data
+        mod (str, optional): The modality. Defaults to 'rna'.
+        uns (str, optional): Where to look for H. Defaults to 'H_OT'.
+        dim (int, optional): The latent dimension. Defaults to 0.
+        n_features (int, optional): The number of top features. Defaults to 5.
 
-    elif method == 'silhouette':
-        sils = []
-        for res in resolution_range:
-            sc.tl.leiden(joint_embedding, resolution=res)
-            try:
-                sils.append(silhouette_score(joint_embedding.X, joint_embedding.obs['leiden']))
-            except:
-                sils.append(-1)
+    Returns:
+        Iterable: A list of features names.
+    """    
+    # TODO: put variable names in uns!
 
-        maxes = []
-        for i in range(1, len(sils)-1):
-            if sils[i] > sils[i+1] and sils[i] >= sils[i-1]:
-                maxes.append(i)
+    # Get names for highly variable features.
+    idx = mdata[mod].var.highly_variable
+    var_names = mdata[mod].var_names[idx]
 
-        if plot:
-            plt.xscale('log')
-            plt.scatter(resolution_range, sils)
-            plt.plot(resolution_range, sils)
-            plt.scatter([resolution_range[maxes[0]]], [sils[maxes[0]]])
-            plt.ylabel('Silhouette score')
-            plt.xlabel('Resolution')
-            plt.show()
+    # Sort them by contribution.
+    var_idx = np.argsort(mdata[mod].uns[uns][:,dim])[::-1]
 
-        return resolution_range[maxes[0]]
+    # Return the top ones.
+    return var_names[var_idx[:n_features]].tolist()
 
 def enrich(mdata: mu.MuData, mod: str = 'rna', uns: str = 'H_OT', n_genes: int = 200,
            sources: Iterable[str] = ['GO:MF', 'GO:CC', 'GO:BP'], ordered: bool = True):
@@ -377,13 +305,16 @@ def enrich(mdata: mu.MuData, mod: str = 'rna', uns: str = 'H_OT', n_genes: int =
     # Initialize ordered genes dictionary.
     ordered_genes = {}
 
+    # Get background genes.
+    background = mdata[mod].var.index.tolist()
+
     # For each dimension,
     for dim in range(mdata[mod].uns[uns].shape[1]):
         # Sort the gene indices by weight.
         idx_sorted = mdata[mod].uns[uns][:,dim].argsort()[::-1]
 
         # Select the `n_genes` highest genes.
-        gene_list = mdata[mod].var.index[idx_sorted].tolist()[:n_genes]
+        gene_list = mdata[mod].var[mdata[mod].var.highly_variable].index[idx_sorted].tolist()[:n_genes]
 
         # Input them in the dictionary.
         ordered_genes['dimension ' + str(dim)] = gene_list
@@ -391,18 +322,19 @@ def enrich(mdata: mu.MuData, mod: str = 'rna', uns: str = 'H_OT', n_genes: int =
     # Make the queries to gProfiler, specifying if genes are ordered.
     enr = sc.queries.enrich(ordered_genes, gprofiler_kwargs={
         'ordered': ordered,
-        'sources': sources})
+        'sources': sources,
+        'domain_scope': 'custom',
+        'background': background,
+        'no_evidences': True
+        })
     
     # Compute the average of the best p_values for each dimension.
     mean_best_p = enr.groupby('query')['p_value'].min().mean()
 
-    # Print the 5 top results.
-    print(enr.loc[:5, ['name', 'p_value', 'query']])
-
     # Return the results of the queries and the average best p_value.
     return enr, mean_best_p
 
-def k_metric(model) -> Dict:
+def ot_dual_loss(model) -> Dict:
     """Return metrics useful to evaluate the choice of latent dimension k.
     - total dual loss
 
@@ -411,12 +343,138 @@ def k_metric(model) -> Dict:
 
     Returns:
         Dict: A dictionary containing the metrics.
-    """    
-    k_metrics = {}
-    k_metrics['ot_loss'] = 0
-    k_metrics['entropy_h'] = 0
+    """
+    loss = 0
     for mod in model.A.keys():
-        k_metrics['ot_loss'] += float(model.ot_dual_loss(mod).cpu())
-        k_metrics['entropy_h'] += -torch.nan_to_num(model.H[mod]*model.H[mod].log()).sum()
-    k_metrics['entropy_w'] = -torch.nan_to_num(model.W*model.W.log()).sum()
-    return k_metrics
+        loss += float(model.ot_dual_loss(mod).cpu())
+    return loss
+
+################################ OLD FUNCTIONS ################################
+
+# def inflexion_pt(a):
+#     second_derivative = [-np.inf]
+#     for i in range(1, len(a) - 1):
+#         second_derivative.append(a[i+1] + a[i-1] - 2 * a[i])
+#     return np.argmax(second_derivative)
+
+# def variance_explained(mdata, score_function='explained_variance_score', plot=True):
+#     """experimental, i have to test this function"""
+#     if score_function == 'explained_variance_score':
+#         f_score = explained_variance_score
+#     elif score_function == 'r2_score':
+#         f_score = r2_score
+#     else:
+#         f_score = explained_variance_score
+#         print('function not recognized, defaulting to explained_variance_score')
+#     score = []
+#     k = mdata.obsm['W_OT'].shape[1]
+#     for mod in mdata.mod:
+#         score.append([])
+#         A = mdata.mod[mod].uns['H_OT'] @ mdata.obsm['W_OT'].T
+#         A = A.cpu().numpy()
+
+#         for i in range(k):
+#             rec = mdata.mod[mod].uns['H_OT'][:,[i]] @ mdata.obsm['W_OT'][:,[i]].T
+#             rec = rec.cpu().numpy()
+#             score[-1].append(f_score(A, rec))
+
+#     if plot:
+#         fig, ax = plt.subplots()
+#         plt.imshow(score, aspect='auto', interpolation='none')
+#         ax.set_xticks(range(k))
+#         ax.set_xlabel('Dimensions')
+#         ax.set_ylabel('Modality')
+#         ax.set_yticks(range(len(mdata.mod)))
+#         ax.set_title('Variance explained')
+#         ax.set_yticklabels(mdata.mod.keys())
+#         plt.colorbar()
+#         plt.show()
+#     return score
+
+# def leiden_multi_obsp(mdata, n_neighbors=15, neighbors_key='wnn', obs='rna:celltype', resolutions=10.**np.linspace(-2, 1, 20)):
+#     aris = []
+#     nmis = []
+#     for resolution in tqdm(resolutions):
+#         sc.tl.leiden(mdata, resolution=resolution, neighbors_key=neighbors_key, key_added='leiden_' + neighbors_key)
+#         aris.append(ARI(mdata.obs['leiden_' + neighbors_key], mdata.obs[obs]))
+#         nmis.append(NMI(mdata.obs['leiden_' + neighbors_key], mdata.obs[obs]))
+#     return resolutions, aris, nmis
+
+
+# def select_dimensions(mdata, plot=True):
+#     latent_dim = mdata.obsm['W_OT'].shape[1]
+#     s = np.zeros(latent_dim)
+#     for mod in mdata.mod:
+#         s += np.array([(mdata[mod].uns['H_OT'][:,[k]] @ mdata.obsm['W_OT'].T[[k]]).std(1).sum() for k in range(latent_dim)])
+
+#     i = inflexion_pt(np.sort(s)[::-1])
+#     i = max(i, 4)
+#     if plot:
+#         plt.plot(np.sort(s)[::-1])
+#         plt.scatter(range(latent_dim), np.sort(s)[::-1])
+#         plt.scatter(range(i+1), np.sort(s)[::-1][:i+1])
+#         plt.plot(np.sort(s)[::-1][:i+1])
+#         plt.show()
+#     return np.argsort(s)[::-1][:i+1].copy()
+
+# def trim_dimensions(mdata, dims):
+#     mdata.obsm['W_OT'] = mdata.obsm['W_OT'][:,dims]
+#     for mod in mdata.mod:
+#         mdata[mod].uns['H_OT'] = mdata[mod].uns['H_OT'][:,dims]
+
+# def best_leiden_resolution(mdata, obsm='W_OT', method='elbow', resolution_range=None, n_neighbors=15, plot=True):
+#     if resolution_range==None:
+#         resolution_range = 10.**np.linspace(-2, 1, 20)
+
+#     if method != 'elbow' and method != 'silhouette':
+#         print('method not recognized, defaulting to elbow')
+#         method = 'elbow'
+
+#     joint_embedding = ad.AnnData(mdata.obsm[obsm].cpu().numpy(), obs=mdata.obs)
+#     sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors)
+
+#     if method == 'elbow':
+#         vars = []
+#         for res in resolution_range:
+#             sc.tl.leiden(joint_embedding, resolution=res)
+#             wss = []
+#             for cat in joint_embedding.obs['leiden'].unique():
+#                 wss.append(joint_embedding.X[joint_embedding.obs['leiden'] == cat].std(0).sum())
+#             vars.append(np.mean(wss))
+
+#         i = inflexion_pt(vars)
+#         if plot:
+#             plt.xscale('log')
+#             plt.scatter(resolution_range, vars)
+#             plt.scatter(resolution_range[i], vars[i])
+#             plt.plot(resolution_range, vars)
+#             plt.ylabel('Average intra-cluster variation')
+#             plt.xlabel('Resolution')
+#             plt.show()
+
+#         return resolution_range[i]
+
+#     elif method == 'silhouette':
+#         sils = []
+#         for res in resolution_range:
+#             sc.tl.leiden(joint_embedding, resolution=res)
+#             try:
+#                 sils.append(silhouette_score(joint_embedding.X, joint_embedding.obs['leiden']))
+#             except:
+#                 sils.append(-1)
+
+#         maxes = []
+#         for i in range(1, len(sils)-1):
+#             if sils[i] > sils[i+1] and sils[i] >= sils[i-1]:
+#                 maxes.append(i)
+
+#         if plot:
+#             plt.xscale('log')
+#             plt.scatter(resolution_range, sils)
+#             plt.plot(resolution_range, sils)
+#             plt.scatter([resolution_range[maxes[0]]], [sils[maxes[0]]])
+#             plt.ylabel('Silhouette score')
+#             plt.xlabel('Resolution')
+#             plt.show()
+
+#         return resolution_range[maxes[0]]

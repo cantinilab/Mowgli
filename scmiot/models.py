@@ -133,7 +133,11 @@ class OTintNMF():
         C /= C.max()
 
         # Compute the kernel K
-        return torch.exp(-C/self.eps).to(device=device, dtype=dtype)
+        K = torch.exp(-C/self.eps).to(device=device, dtype=dtype)
+
+        del C
+        
+        return K
 
 
     def compute_lazy_ground_cost(self, features, cost: str,
@@ -229,6 +233,10 @@ class OTintNMF():
 
             # Use the specified cost function to compute ground cost.
             cost = self.cost if isinstance(self.cost, str) else self.cost[mod]
+            try:
+                cost_path = self.cost_path[mod]
+            except:
+                cost_path = None
 
             features = 1e-6 + self.A[mod].cpu().numpy()
             if self.pca_cost:
@@ -237,7 +245,7 @@ class OTintNMF():
 
             self.K[mod] = self.compute_ground_cost(
                 features, cost, force_recompute,
-                self.cost_path, dtype, device)
+                cost_path, dtype, device)
 
             ################# Normalize the reference dataset #################
 
@@ -262,6 +270,9 @@ class OTintNMF():
         self.W = torch.rand(
             self.latent_dim, mdata.n_obs, device=device, dtype=dtype)
         self.W /= self.W.sum(0)
+
+        del keep_idx, features
+
 
     def fit_transform(self, mdata: mu.MuData, max_iter_inner: int = 100,
                       max_iter: int = 25, device: torch.device = 'cpu',
@@ -311,13 +322,15 @@ class OTintNMF():
                 htgw = 0
                 for mod in mdata.mod:
                     htgw += self.H[mod].T@self.G[mod]/len(mdata.mod)
-                self.W = F.softmin(htgw/self.rho_w, dim=0)
+                self.W = F.softmin(htgw/self.rho_w, dim=0).detach()
+                del htgw
 
             # Update the progress bar.
             pbar.update(1)
 
             # Save the total dual loss.
-            self.losses.append(self.total_dual_loss())
+            with torch.no_grad():
+                self.losses.append(self.total_dual_loss().cpu().detach())
 
             ############################## H step #############################
 
@@ -329,17 +342,20 @@ class OTintNMF():
             # Update the omic specific factors `H[mod]`.
             with torch.no_grad():
                 for mod in mdata.mod:
-                    self.H[mod] = F.softmin(self.G[mod]@self.W.T/self.rho_h, dim=0)
+                    self.H[mod] = F.softmin(self.G[mod]@self.W.T/self.rho_h, dim=0).detach()
 
             # Update the progress bar.
             pbar.update(1)
 
             # Save the total dual loss.
-            self.losses.append(self.total_dual_loss())
+            with torch.no_grad():
+                self.losses.append(self.total_dual_loss().cpu().detach())
 
             # Early stopping
             if self.early_stop(self.losses, tol_outer, nonincreasing=True):
                 break
+
+            # TODO: implement keyboard interrupt
 
         # Add H and W to the MuData object.
         for mod in mdata.mod:
@@ -388,11 +404,13 @@ class OTintNMF():
                 optimizer.zero_grad()
                 loss = loss_fn()
                 loss.backward()
-                return loss
+                detached_loss = loss.cpu().detach()
+                del loss
+                return detached_loss
 
             # Add a value to the loss history.
             with torch.no_grad():
-                history.append(loss_fn())
+                history.append(loss_fn().cpu().detach())
 
             # Perform an optimization step.
             optimizer.step(closure)
@@ -488,9 +506,12 @@ class OTintNMF():
         prod = torch.log(self.K[mod]@torch.exp(self.G[mod]/self.eps - scale)) + scale
 
         # Compute the dot product with A.
-        loss = torch.sum(self.A[mod]*prod)
+        loss = self.eps*torch.sum(self.A[mod]*prod)
+
+        del scale
+        del prod
         
-        return self.eps*loss
+        return loss
 
     @torch.no_grad()
     def total_dual_loss(self) -> torch.Tensor:
@@ -566,6 +587,8 @@ class OTintNMF():
         # Entropy dual loss term.
         coef = len(modalities)*self.rho_w
         loss_w -= coef*self.entropy_dual_loss(-htgw/coef)
+
+        del htgw
 
         # Return the loss.
         return loss_w/n

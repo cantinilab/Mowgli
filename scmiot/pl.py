@@ -10,6 +10,76 @@ from matplotlib.ticker import LinearLocator, FormatStrFormatter
 import torch
 from torch.nn.utils import parameters_to_vector as Params2Vec
 from torch.nn.utils import vector_to_parameters as Vec2Params
+import plotly.graph_objects as go
+from scipy.spatial.distance import cdist
+
+def riverplot(H_list, threshold):
+    k_list = [H.shape[1] for H in H_list]
+    id_left = 0
+    id_right = k_list[0]
+
+    labels_right = ['K' + str(k_list[0]) + '_' + str(i) for i in range(k_list[0])]
+    labels = [] + labels_right
+
+    source, target, value = [], [], []
+
+    for p in range(1, len(k_list)):
+
+        labels_left = [] + labels_right
+        labels_right = ['K' + str(k_list[p]) + '_' + str(i) for i in range(k_list[p])]
+        labels += labels_right
+
+        D = cdist(H_list[p-1].T, H_list[p].T, metric='cosine')
+
+        for i in range(H_list[p-1].shape[1]):
+            for j in range(H_list[p].shape[1]):
+                source.append(id_left + i)
+                target.append(id_right + j)
+                value.append(1 - D[i, j])
+        
+        id_left = id_right
+        id_right = id_left + k_list[p]
+    
+    color = []
+    for i in range(len(value)):
+        if value[i] < threshold:
+            color.append("rgba(0,0,0,.02)")
+        else:
+            color.append("lightgrey")
+
+    fig = go.Figure(data=[go.Sankey(
+        node = dict(
+        pad = 15,
+        thickness = 10,
+        label = labels,
+    ),
+    link = dict(
+        source = source,
+        target = target,
+        value = value,
+        color = color
+    ))])
+
+    fig.update_layout(title_text="Cosine similarity between factors", font_size=10)
+    fig.show()
+
+def clustermap(mdata: mu.MuData, obsm: str = 'W_OT', cmap='viridis', **kwds):
+    joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
+    sc.pl.clustermap(joint_embedding, cmap=cmap, **kwds)
+
+def factor_violin(
+    mdata: mu.MuData, groupby: str, obsm: str = 'W_OT', dim: int = 0, **kwds):
+    """Make a violin plot of cells for a given latent dimension.
+
+    Args:
+        mdata (mu.MuData): The input data
+        dim (int, optional): The latent dimension. Defaults to 0.
+        obsm (str, optional): The embedding. Defaults to 'W_OT'.
+        groupby (str, optional): Observation groups.
+    """    
+    joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
+    joint_embedding.obs['Factor ' + str(dim)] = joint_embedding.X[:,dim]
+    sc.pl.violin(joint_embedding, keys='Factor ' + str(dim), groupby=groupby, **kwds)
 
 def heatmap(mdata: mu.MuData, obsm: str, groupby: str, cmap: str = 'viridis',
             sort_var: bool = False, save: str = None, **kwds) -> None:
@@ -24,11 +94,16 @@ def heatmap(mdata: mu.MuData, obsm: str, groupby: str, cmap: str = 'viridis',
     """
     
     joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
+    try:
+        sc.pp.pca(joint_embedding)
+        sc.tl.dendrogram(joint_embedding, groupby=groupby, use_rep='X_pca')
+    except:
+        pass
     if sort_var:
         idx = joint_embedding.var_names[joint_embedding.X.std(0).argsort()[::-1]]
     else:
         idx = joint_embedding.var_names
-    sc.pl.heatmap(joint_embedding, idx, groupby=groupby, cmap=cmap, save=save, **kwds)
+    return sc.pl.heatmap(joint_embedding, idx, groupby=groupby, cmap=cmap, save=save, **kwds)
 
 def tau_2d(alpha, beta, theta):
   a = torch.rand_like(theta[:,None,None])
