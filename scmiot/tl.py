@@ -202,8 +202,9 @@ def predict_features_corr(mdata: mu.MuData, mod: str, n_neighbors: int,
         idx = x > 0 if remove_zeros else np.arange(len(x))
 
         # Append to correlation lists.
-        pearson.append(pearsonr(x[idx], y[idx])[0])
-        spearman.append(spearmanr(x[idx], y[idx])[0])
+        if len(idx) > 2:
+            pearson.append(pearsonr(x[idx], y[idx])[0])
+            spearman.append(spearmanr(x[idx], y[idx])[0])
     
     return pearson, spearman
 
