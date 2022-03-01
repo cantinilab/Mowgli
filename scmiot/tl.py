@@ -201,8 +201,8 @@ def predict_features_corr(mdata: mu.MuData, mod: str, n_neighbors: int,
         # If `remove_zeros`, select indices where x > 0
         idx = x > 0 if remove_zeros else np.arange(len(x))
 
-        # Append to correlation lists.
-        if np.sum(idx) > 2:
+        # Append to correlation lists, is the vectors are not empty nor constant
+        if np.sum(idx) > 2 and np.any(x[idx] != x[idx][0]) and np.any(y[idx] != y[idx][0]):
             pearson.append(pearsonr(x[idx], y[idx])[0])
             spearman.append(spearmanr(x[idx], y[idx])[0])
     
@@ -288,7 +288,7 @@ def top_features(
     return var_names[var_idx[:n_features]].tolist()
 
 def enrich(mdata: mu.MuData, mod: str = 'rna', uns: str = 'H_OT', n_genes: int = 200,
-           sources: Iterable[str] = ['GO:MF', 'GO:CC', 'GO:BP'], ordered: bool = True):
+           sources: Iterable[str] = ['GO:MF', 'GO:CC', 'GO:BP'], ordered: bool = True, domain_scope='custom_annotated'):
     """Return Gene Set Enrichment Analysis results for each dimension.
 
     Args:
@@ -314,8 +314,13 @@ def enrich(mdata: mu.MuData, mod: str = 'rna', uns: str = 'H_OT', n_genes: int =
         # Sort the gene indices by weight.
         idx_sorted = mdata[mod].uns[uns][:,dim].argsort()[::-1]
 
+        if n_genes == 'auto':
+            nn = np.sum(np.cumsum(np.sort(mdata[mod].uns[uns][:,dim])) > .05)
+        else:
+            nn = n_genes
+
         # Select the `n_genes` highest genes.
-        gene_list = mdata[mod].var[mdata[mod].var.highly_variable].index[idx_sorted].tolist()[:n_genes]
+        gene_list = mdata[mod].var[mdata[mod].var.highly_variable].index[idx_sorted].tolist()[:nn]
 
         # Input them in the dictionary.
         ordered_genes['dimension ' + str(dim)] = gene_list
@@ -324,8 +329,8 @@ def enrich(mdata: mu.MuData, mod: str = 'rna', uns: str = 'H_OT', n_genes: int =
     enr = sc.queries.enrich(ordered_genes, gprofiler_kwargs={
         'ordered': ordered,
         'sources': sources,
-        'domain_scope': 'custom',
-        'background': background,
+        'domain_scope': domain_scope,
+        # 'background': background,
         'no_evidences': True
         })
     

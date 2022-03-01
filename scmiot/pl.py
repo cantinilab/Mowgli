@@ -13,6 +13,23 @@ from torch.nn.utils import vector_to_parameters as Vec2Params
 import plotly.graph_objects as go
 from scipy.spatial.distance import cdist
 
+def rankings(mdata, mod = 'rna', uns = 'H_OT', dim = 0, n_show = 5):
+    weights = mdata[mod].uns[uns][:,dim]
+    idx = np.argsort(weights)
+    var_names = mdata[mod].var_names[mdata[mod].var['highly_variable']]
+
+    yy = weights[idx]
+    xx = np.arange(len(weights))
+    ss = np.array(var_names.tolist())[idx]
+
+    plt.scatter(xx, yy, s=10)
+    for x, y, s in zip(xx[-n_show:], yy[-n_show:], ss[-n_show:]):
+        plt.text(x, y, s)
+    plt.title('Factor ' + str(dim) + ' (' + mod + ')')
+    plt.xlabel('Ranking')
+    plt.ylabel('Weight')
+    plt.show()
+
 def riverplot(H_list, threshold):
     k_list = [H.shape[1] for H in H_list]
     id_left = 0
