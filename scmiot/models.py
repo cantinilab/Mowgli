@@ -199,7 +199,7 @@ class OTintNMF():
             force_recompute (bool, optional): Where to recompute the cost even if there is a matrix precomputed. Defaults to False.
         """
 
-        classical_nmf = NMF(n_components=self.latent_dim, init = "nndsvd", max_iter=1)
+        # classical_nmf = NMF(n_components=self.latent_dim, init = "nndsvd", max_iter=1)
 
         self.mod_weight = {}
 
@@ -249,14 +249,16 @@ class OTintNMF():
             ####################### Initialize matrices #######################
 
             # Initialize the factor `H`.
-            self.H[mod] = torch.Tensor(classical_nmf.fit_transform(self.A[mod].cpu())).to(device=device, dtype=dtype)
+            # self.H[mod] = torch.Tensor(classical_nmf.fit_transform(self.A[mod].cpu())).to(device=device, dtype=dtype)
+            self.H[mod] = torch.rand(self.A[mod].shape[0], self.latent_dim, device=device, dtype=dtype)
             self.H[mod] = self.normalize_tensor(self.H[mod], self.normalize_H)
 
             # Initialize the dual variable `G`
             self.G[mod] = torch.zeros_like(self.A[mod], requires_grad=True)
 
         # Initialize the shared factor `W`
-        self.W = torch.Tensor(classical_nmf.components_).to(device=device, dtype=dtype)
+        # self.W = torch.Tensor(classical_nmf.components_).to(device=device, dtype=dtype)
+        self.W = torch.rand(self.latent_dim, self.A[mod].shape[1], device=device, dtype=dtype)
         self.W = self.normalize_tensor(self.W, self.normalize_W)
         
         del keep_idx, features
