@@ -207,7 +207,7 @@ class OTintNMF():
         for mod in mdata.mod:
 
             if self.use_mod_weight:
-                self.mod_weight[mod] = torch.Tensor(mdata.obs[mod + ':mod_weight'].to_numpy()).reshape(1, -1)
+                self.mod_weight[mod] = torch.Tensor(mdata.obs[mod + ':mod_weight'].to_numpy()).to(dtype=dtype, device=device).reshape(1, -1)
 
             ################ Generate the reference dataset A. ################
 
