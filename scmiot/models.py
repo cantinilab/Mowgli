@@ -66,6 +66,8 @@ class OTintNMF():
         self.cost = cost
         self.cost_path = cost_path
         self.pca_cost = pca_cost
+        self.scores_history = []
+        self.scores_history = []
 
         # Initialize the loss histories.
         self.losses_w, self.losses_h, self.losses = [], [], []
@@ -184,7 +186,7 @@ class OTintNMF():
         elif normalize == 'full':
             return X/X.sum()
         else:
-            return X
+            return X/X.sum(0).mean()
 
     @ignore_warnings(category=ConvergenceWarning)
     def init_parameters(
@@ -208,6 +210,8 @@ class OTintNMF():
 
             if self.use_mod_weight:
                 self.mod_weight[mod] = torch.Tensor(mdata.obs[mod + ':mod_weight'].to_numpy()).to(dtype=dtype, device=device).reshape(1, -1)
+            else:
+                self.mod_weight[mod] = torch.ones(1, mdata.n_obs, dtype=dtype, device=device)
 
             ################ Generate the reference dataset A. ################
 
@@ -217,6 +221,16 @@ class OTintNMF():
             # Make the reference dataset.
             self.A[mod] = self.reference_dataset(
                 mdata[mod].X, dtype, device, keep_idx)
+
+
+            ################# Normalize the reference dataset #################
+
+            # Add a small value for numerical stability, and normalize `A^T`.
+            self.A[mod] += 1e-6
+            if self.normalize_A == 'cols':
+                self.A[mod] /= self.A[mod].sum(0)
+            else:
+                self.A[mod] /= self.A[mod].sum(0).mean()
 
             ####################### Compute ground cost #######################
 
@@ -235,16 +249,6 @@ class OTintNMF():
             self.K[mod] = self.compute_ground_cost(
                 features, cost, force_recompute,
                 cost_path, dtype, device)
-
-            ################# Normalize the reference dataset #################
-
-            # Add a small value for numerical stability, and normalize `A^T`.
-            self.A[mod] += 1e-6
-            if self.normalize_A == 'cols':
-                self.A[mod] /= self.A[mod].sum(0)
-            else:
-                self.A[mod] /= self.A[mod].sum(0).mean()
-
 
             ####################### Initialize matrices #######################
 
@@ -304,8 +308,8 @@ class OTintNMF():
                 ############################## W step #############################
 
                 # Optimize the dual variable `G`.
-                for mod in self.G:
-                    nn.init.zeros_(self.G[mod])
+                # for mod in self.G:
+                #     nn.init.zeros_(self.G[mod])
                 
                 self.optimize(loss_fn=self.loss_fn_w, max_iter=max_iter_inner,
                     history=self.losses_h, tol=tol_inner, pbar=pbar, device=device)
@@ -313,12 +317,11 @@ class OTintNMF():
                 # Update the shared factor `W`.
                 htgw = 0
                 for mod in mdata.mod:
-                    if self.use_mod_weight:
-                        htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])/len(mdata.mod)
-                    else:
-                        htgw += self.H[mod].T@self.G[mod]/len(mdata.mod)
-                self.W = torch.exp(-htgw.detach()/self.rho_w)
-                self.W = self.normalize_tensor(self.W, self.normalize_W)
+                    htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])/len(mdata.mod)
+                if self.normalize_W == 'cols':
+                    self.W = F.softmin(htgw.detach()/self.rho_w, dim=0)
+                else:
+                    self.W = torch.exp(-htgw.detach()/self.rho_w)
                 del htgw
 
                 # Update the progress bar.
@@ -327,28 +330,37 @@ class OTintNMF():
                 # Save the total dual loss.
                 self.losses.append(self.total_dual_loss().cpu().detach())
 
+                if self.lbda:
+                    self.scores_history.append(self.unbalanced_scores())
+                else:
+                    self.scores_history.append(self.mass_transported())
+
                 ############################## H step #############################
 
                 # Optimize the dual variable `G`.
-                for mod in self.G:
-                    nn.init.zeros_(self.G[mod])
+                # for mod in self.G:
+                #     nn.init.zeros_(self.G[mod])
                 
                 self.optimize(loss_fn=self.loss_fn_h, max_iter=max_iter_inner,
                     history=self.losses_h, tol=tol_inner, pbar=pbar, device=device)
 
                 # Update the omic specific factors `H[mod]`.
                 for mod in mdata.mod:
-                    if self.use_mod_weight:
-                        self.H[mod] = torch.exp(-((self.mod_weight[mod]*self.G[mod])@self.W.T).detach()/self.rho_h)
+                    if self.normalize_H == 'cols':
+                        self.H[mod] = F.softmin(((self.mod_weight[mod]*self.G[mod])@self.W.T).detach()/self.rho_h, dim=0)
                     else:
-                        self.H[mod] = torch.exp(-(self.G[mod]@self.W.T).detach()/self.rho_h)
-                    self.H[mod] = self.normalize_tensor(self.H[mod], self.normalize_H)
+                        self.H[mod] = torch.exp(-((self.mod_weight[mod]*self.G[mod])@self.W.T).detach()/self.rho_h)
 
                 # Update the progress bar.
                 pbar.update(1)
 
                 # Save the total dual loss.
                 self.losses.append(self.total_dual_loss().cpu().detach())
+
+                if self.lbda:
+                    self.scores_history.append(self.unbalanced_scores())
+                else:
+                    self.scores_history.append(self.mass_transported())
 
                 # Early stopping
                 if self.early_stop(self.losses, tol_outer, nonincreasing=True):
@@ -494,8 +506,31 @@ class OTintNMF():
             return -torch.logsumexp(Y, dim=(0,1)).sum()
         else:
             return -torch.exp(Y).sum()
+    
+    def mass_transported(self, per_cell=False, per_mod=False):
+        if per_mod:
+            score = {}
+        else:
+            score = 0
+        for mod in self.A:
+            if self.lbda:
+                prod = torch.exp(-self.lbda*torch.log1p(-self.G[mod]/self.lbda)/self.eps)
+            else:
+                prod = torch.exp(self.G[mod]/self.eps)
+            prod /= self.K[mod]@prod
 
-    def ot_dual_loss(self, mod: str) -> torch.Tensor:
+            if per_cell:
+                s = torch.sum(self.A[mod]*prod, dim=0)
+            else:
+                s = torch.sum(self.A[mod]*prod)/self.A[mod].shape[1]
+            
+            if per_mod:
+                score[mod] = 1 - s.detach().cpu().numpy()
+            else:
+                score += (1 - s.detach().cpu().numpy())/len(self.A)
+        return score
+
+    def ot_dual_loss(self, mod: str, dim=(0, 1)) -> torch.Tensor:
         """The dual optimal transport loss. We omit the constant entropy term.
 
         Args:
@@ -517,10 +552,7 @@ class OTintNMF():
         prod = torch.log(self.K[mod]@torch.exp(log_fG - scale)) + scale
 
         # Compute the dot product with A.
-        if self.use_mod_weight:
-            loss = self.eps*torch.sum(self.mod_weight[mod]*self.A[mod]*prod)
-        else:
-            loss = self.eps*torch.sum(self.A[mod]*prod)
+        loss = self.eps*torch.sum(self.mod_weight[mod]*self.A[mod]*prod, dim=dim)
 
         del scale
         del prod
@@ -550,10 +582,7 @@ class OTintNMF():
             loss -= self.ot_dual_loss(mod)
 
             # Add the Lagrange multiplier term.
-            if self.use_mod_weight:
-                loss += ((self.H[mod] @ self.W) * (self.mod_weight[mod]*self.G[mod])).sum()
-            else:
-                loss += ((self.H[mod] @ self.W) * self.G[mod]).sum()
+            loss += ((self.H[mod] @ self.W) * (self.mod_weight[mod]*self.G[mod])).sum()
 
             # Add the `H[mod]` entropy term.
             loss -= self.rho_h*self.entropy(self.H[mod], min_one=True)
@@ -593,8 +622,8 @@ class OTintNMF():
             # A and HW don't necessarily have the same mass, so we need to create or destroy at least this amount.
             minimum_error = torch.abs(self.A[mod].sum(0) - (self.H[mod]@self.W).sum(0))
             
-            # This is a score between 0 and 1. 0 means we're in the balanced case. 1 means we destroy or create averything.
-            scores[mod] = torch.mean((mass_difference - minimum_error)/(maximum_error - minimum_error)).detach()
+            # This is a score between 0 and 1. 0 means we're in the balanced case. 1 means we destroy or create everything.
+            scores[mod] = torch.median((mass_difference - minimum_error)/(maximum_error - minimum_error)).detach()
         
         return scores
 
@@ -613,10 +642,7 @@ class OTintNMF():
             
             # Entropy dual loss term
             coef = self.rho_h
-            if self.use_mod_weight:
-                loss_h -= coef*self.entropy_dual_loss(-(self.mod_weight[mod]*self.G[mod])@self.W.T/coef, self.normalize_H)
-            else:
-                loss_h -= coef*self.entropy_dual_loss(-self.G[mod]@self.W.T/coef, self.normalize_H)
+            loss_h -= coef*self.entropy_dual_loss(-(self.mod_weight[mod]*self.G[mod])@self.W.T/coef, self.normalize_H)
         return loss_h/n
 
     def loss_fn_w(self) -> torch.Tensor:
@@ -631,10 +657,7 @@ class OTintNMF():
             n = self.A[mod].shape[1]
 
             # For the entropy dual loss term.
-            if self.use_mod_weight:
-                htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])
-            else:
-                htgw += self.H[mod].T@self.G[mod]
+            htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])
 
             # OT dual loss term.
             loss_w += self.ot_dual_loss(mod)
