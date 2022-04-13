@@ -131,7 +131,10 @@ class OTintNMF():
             try:
                 C = np.load(cost_path)
             except:
-                C = cdist(features, features, metric=cost)
+                if cost == 'ones':
+                    C = 1 - torch.eye(features.shape[0], dtype=dtype, device=device)
+                else:
+                    C = cdist(features, features, metric=cost)
                 recomputed = True
 
         # If we did recompute the cost, save it.
