@@ -349,7 +349,7 @@ class OTintNMF():
 
                 # Update the omic specific factors `H[mod]`.
                 for mod in mdata.mod:
-                    coef = self.W.shape[1]*np.log(self.H[mod].shape[0])
+                    coef = self.W.shape[0]*np.log(self.H[mod].shape[0])
                     coef /= self.W.shape[1]*self.rho_h
                     if self.normalize_H == 'cols':
                         self.H[mod] = F.softmin(coef*((self.mod_weight[mod]*self.G[mod])@self.W.T).detach(), dim=0)
