@@ -66,8 +66,7 @@ class OTintNMF():
         self.cost = cost
         self.cost_path = cost_path
         self.pca_cost = pca_cost
-        self.scores_history = []
-        self.scores_history = []
+        self.scores_history = [0]
 
         # Initialize the loss histories.
         self.losses_w, self.losses_h, self.losses = [], [], []
@@ -132,7 +131,7 @@ class OTintNMF():
                 C = np.load(cost_path)
             except:
                 if cost == 'ones':
-                    C = 1 - torch.eye(features.shape[0], dtype=dtype, device=device)
+                    C = 1 - np.eye(features.shape[0])
                 else:
                     C = cdist(features, features, metric=cost)
                 recomputed = True
@@ -320,11 +319,12 @@ class OTintNMF():
                 # Update the shared factor `W`.
                 htgw = 0
                 for mod in mdata.mod:
-                    htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])/len(mdata.mod)
+                    htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])
+                coef = np.log(self.W.shape[0])/(len(mdata.mod)*self.rho_w)
                 if self.normalize_W == 'cols':
-                    self.W = F.softmin(htgw.detach()/self.rho_w, dim=0)
+                    self.W = F.softmin(coef*htgw.detach(), dim=0)
                 else:
-                    self.W = torch.exp(-htgw.detach()/self.rho_w)
+                    self.W = torch.exp(-coef*htgw.detach())
                 del htgw
 
                 # Update the progress bar.
@@ -349,10 +349,12 @@ class OTintNMF():
 
                 # Update the omic specific factors `H[mod]`.
                 for mod in mdata.mod:
+                    coef = self.W.shape[1]*np.log(self.H[mod].shape[0])
+                    coef /= self.W.shape[1]*self.rho_h
                     if self.normalize_H == 'cols':
-                        self.H[mod] = F.softmin(((self.mod_weight[mod]*self.G[mod])@self.W.T).detach()/self.rho_h, dim=0)
+                        self.H[mod] = F.softmin(coef*((self.mod_weight[mod]*self.G[mod])@self.W.T).detach(), dim=0)
                     else:
-                        self.H[mod] = torch.exp(-((self.mod_weight[mod]*self.G[mod])@self.W.T).detach()/self.rho_h)
+                        self.H[mod] = torch.exp(-coef*((self.mod_weight[mod]*self.G[mod])@self.W.T).detach())
 
                 # Update the progress bar.
                 pbar.update(1)
@@ -436,6 +438,7 @@ class OTintNMF():
 
                 pbar.set_postfix({
                     'loss': total_loss,
+                    'mass_transported': self.scores_history[-1],
                     'loss_inner': history[-1].cpu().numpy(),
                     'inner_steps': i,
                     'gpu_memory_allocated': torch.cuda.memory_allocated(device=device)
@@ -570,8 +573,6 @@ class OTintNMF():
             torch.Tensor: The loss
         """
 
-        # TODO: add constantsssss
-
         # Initialize the loss to zero.
         loss = 0
 
@@ -582,19 +583,21 @@ class OTintNMF():
         for mod in modalities:
 
             # Add the OT dual loss.
-            loss -= self.ot_dual_loss(mod)
+            loss -= self.ot_dual_loss(mod)/self.W.shape[1]
 
             # Add the Lagrange multiplier term.
-            loss += ((self.H[mod] @ self.W) * (self.mod_weight[mod]*self.G[mod])).sum()
+            loss += ((self.H[mod] @ self.W) * (self.mod_weight[mod]*self.G[mod])).sum()/self.W.shape[1]
 
             # Add the `H[mod]` entropy term.
-            loss -= self.rho_h*self.entropy(self.H[mod], min_one=True)
+            coef = self.rho_h/(self.H[mod].shape[1]*np.log(self.H[mod].shape[0]))
+            loss -= coef*self.entropy(self.H[mod], min_one=True)
 
         # Add the `W` entropy term.
-        loss -= len(modalities)*self.rho_w*self.entropy(self.W, min_one=True)
+        coef = len(modalities)*self.rho_w/(self.W.shape[1]*np.log(self.W.shape[0]))
+        loss -= coef*self.entropy(self.W, min_one=True)
 
         # Return the full loss.
-        return loss/self.W.shape[1]
+        return loss
     
     def unbalanced_scores(self):
 
@@ -641,12 +644,12 @@ class OTintNMF():
             n = self.A[mod].shape[1]
 
             # OT dual loss term
-            loss_h += self.ot_dual_loss(mod)
+            loss_h += self.ot_dual_loss(mod)/n
             
             # Entropy dual loss term
-            coef = self.rho_h
-            loss_h -= coef*self.entropy_dual_loss(-(self.mod_weight[mod]*self.G[mod])@self.W.T/coef, self.normalize_H)
-        return loss_h/n
+            coef = self.rho_h/(self.H[mod].shape[1]*np.log(self.H[mod].shape[0]))
+            loss_h -= coef*self.entropy_dual_loss(-(self.mod_weight[mod]*self.G[mod])@self.W.T/(n*coef), self.normalize_H)
+        return loss_h
 
     def loss_fn_w(self) -> torch.Tensor:
         """Return the loss for the optimization of W
@@ -663,13 +666,13 @@ class OTintNMF():
             htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])
 
             # OT dual loss term.
-            loss_w += self.ot_dual_loss(mod)
+            loss_w += self.ot_dual_loss(mod)/n
         
         # Entropy dual loss term.
-        coef = len(self.A.keys())*self.rho_w
-        loss_w -= coef*self.entropy_dual_loss(-htgw/coef, self.normalize_W)
+        coef = len(self.A.keys())*self.rho_w/(self.W.shape[1]*np.log(self.W.shape[0]))
+        loss_w -= coef*self.entropy_dual_loss(-htgw/(coef*n), self.normalize_W)
 
         del htgw
 
         # Return the loss.
-        return loss_w/n
+        return loss_w
