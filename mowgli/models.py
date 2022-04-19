@@ -1,46 +1,27 @@
-# PyTorch
 import torch
-from torch import nn, optim
+from torch import optim
 import torch.nn.functional as F
 
-# For cost matrices
 import numpy as np
-from scipy.spatial.distance import cdist
-
-# sklearn
 from sklearn.decomposition import PCA
-from sklearn.decomposition import NMF
-from sklearn.utils._testing import ignore_warnings
-from sklearn.exceptions import ConvergenceWarning
 
-# Typing
-from typing import Iterable, List, Set, Dict, Tuple, Optional
-from typing import Callable, Iterator, Union, Optional, List
-
-# Biology
+from typing import Callable, List
 import muon as mu
-
-# Progress bar
 from tqdm import tqdm
 
 class MowgliModel():
     
     def __init__(
-        self, latent_dim: int = 15, rho_h: float = 5e-2, rho_w: float = 5e-2,
-        eps: float = 5e-2, cost: str = 'cosine', pca_cost: bool = False,
-        cost_path: dict = None, lbda: float = None, normalize_A: str = 'cols', normalize_H: str = 'cols',
-        normalize_W: str = 'cols', use_mod_weight: bool = False):
-        """Optimal Transport Integrative NMF.
-
-        Args:
-            latent_dim (int, optional): Latent dimension of the model. Defaults to 15.
-            rho_h (float, optional): Entropic regularization parameter for the disctionary. Defaults to 1e-1.
-            rho_w (float, optional): Entropic regularization parameter for the embeddings. Defaults to 1e-1.
-            eps (float, optional): Entropic regularization parameter for the Sinkhorn loss. Defaults to 5e-2.
-            cost (str, optional): Function to compute the ground cost matrix. Defaults to 'cosine'.
-            pca_cost (bool, optional): Whether to compute the ground cost on a PCA reduction instead of full data. Defaults to False.
-            cost_path (dict, optional): If specified, save the computed ground cost to this path. Defaults to None.
-        """
+        self,
+        latent_dim: int = 15,
+        use_mod_weight: bool = False,
+        rho_h: float = 5e-2, rho_w: float = 5e-2,
+        eps: float = 5e-2, lbda: float = None,
+        cost: str = 'cosine', pca_cost: bool = False,
+        cost_path: dict = None,
+        normalize_A: str = 'cols',
+        normalize_H: str = 'cols',
+        normalize_W: str = 'cols'):
 
         # Check that the user-defined parameters are valid.
         assert(latent_dim > 0)
@@ -66,134 +47,20 @@ class MowgliModel():
         self.cost = cost
         self.cost_path = cost_path
         self.pca_cost = pca_cost
+
+        # Initialize the loss and statistics histories.
+        self.losses_w, self.losses_h, self.losses = [], [], []
         self.scores_history = [0]
 
-        # Initialize the loss histories.
-        self.losses_w, self.losses_h, self.losses = [], [], []
-
         # Initialize the dictionaries containing matrices for each omics.
-        self.A, self.H, self.G, self.C, self.K = {}, {}, {}, {}, {}
-    
-    def reference_dataset(self, X, dtype: torch.dtype, device: torch.device,
-        keep_idx: Iterable) -> torch.Tensor:
-        """Select features, transpose dataset and convert to Tensor.
+        self.A, self.H, self.G, self.K = {}, {}, {}, {}
 
-        Args:
-            X (array-like): The input data
-            dtype (torch.dtype): The dtype to create
-            device (torch.device): The device to create on
-            keep_idx (Iterable): The variables to keep.
-
-        Returns:
-            torch.Tensor: The reference dataset A.
-        """
-
-        # Keep only the highly variable features.
-        A = X[:, keep_idx].T
-
-        # If the dataset is sparse, make it dense.
-        try:
-            A = A.todense()
-        except:
-            pass
-
-        # Send the matrix `A` to PyTorch.
-        return torch.from_numpy(A).to(device=device, dtype=dtype).contiguous()
-    
-    def compute_ground_cost(self, features, cost: str,
-        force_recompute: bool, cost_path: str, dtype: torch.dtype,
-        device: torch.device) -> torch.Tensor:
-        """Compute the ground cost (not lazily!)
-
-        Args:
-            features (array-like): A array with the features to compute the cost on.
-            cost (str): The function to compute the cost. Scipy distances are allowed.
-            force_recompute (bool): Recompute even is there is already a cost matrix saved at the provided path.
-            cost_path (str): Where to look for or where to save the cost.
-            dtype (torch.dtype): The dtype for the output.
-            device (torch.device): The device for the ouput.
-
-        Returns:
-            torch.Tensor: The ground cost
-        """        
-
-        # Initialize the `recomputed variable`.
-        recomputed = False
-
-        # If we force recomputing, then compute the ground cost.
-        if force_recompute:
-            C = cdist(features, features, metric=cost)
-            recomputed = True
-
-        # If the cost is not yet computed, try to load it or compute it.
-        if not recomputed:
-            try:
-                C = np.load(cost_path)
-            except:
-                if cost == 'ones':
-                    C = 1 - np.eye(features.shape[0])
-                else:
-                    C = cdist(features, features, metric=cost)
-                recomputed = True
-
-        # If we did recompute the cost, save it.
-        if recomputed and self.cost_path:
-            np.save(cost_path, C)
-
-        C = torch.from_numpy(C).to(device=device, dtype=dtype)
-        C /= C.max()
-
-        # Compute the kernel K
-        K = torch.exp(-C/self.eps).to(device=device, dtype=dtype)
-
-        del C
-        
-        return K
-
-    def update_latent_dim(self, latent_dim: int) -> None:
-        """Change the latent dimension. This allows you to keep the
-        previous dual variable as a good initialization for the new
-        optimization.
-
-        Args:
-            latent_dim (int): The new latent_dimension.
-        """
-
-        assert(latent_dim > 0)
-
-        self.latent_dim = latent_dim
-
-        # Initialize the factor `H`.
-        for mod in self.H.keys():
-            # Get the dimensions, device and dtype for H.
-            n_var = self.H[mod].shape[0]
-            device = self.H[mod].device
-            dtype = self.H[mod].dtype
-
-            # Create a new random H.
-            self.H[mod] = torch.rand(
-                n_var, self.latent_dim, device=device, dtype=dtype)
-            self.H[mod] = self.normalize_tensor(self.H[mod])
-
-        # Initialize the shared factor `W`.
-        self.W = torch.rand(
-            self.latent_dim, self.W.shape[1], device=device, dtype=dtype)
-        self.W = self.normalize_tensor(self.W)
-    
-    def normalize_tensor(self, X: torch.Tensor, normalize: str):
-        if normalize == 'cols':
-            return X/X.sum(0)
-        elif normalize == 'rows':
-            return (X.T/X.sum(1)).T
-        elif normalize == 'full':
-            return X/X.sum()
-        else:
-            return X/X.sum(0).mean()
-
-    @ignore_warnings(category=ConvergenceWarning)
     def init_parameters(
-        self, mdata: mu.MuData, dtype: torch.dtype,
-        device: torch.device, force_recompute=False) -> None:
+        self,
+        mdata: mu.MuData,
+        dtype: torch.dtype, device: torch.device,
+        force_recompute: bool = False
+        ) -> None:
         """Initialize the parameters for the model
 
         Args:
@@ -270,7 +137,7 @@ class MowgliModel():
         del keep_idx, features
 
 
-    def fit_transform(self, mdata: mu.MuData, max_iter_inner: int = 100,
+    def train(self, mdata: mu.MuData, max_iter_inner: int = 100,
                       max_iter: int = 25, device: torch.device = 'cpu',
                       lr: float = 1, dtype: torch.dtype = torch.float,
                       tol_inner: float = 1e-9, tol_outer: float = 1e-3,
@@ -449,123 +316,6 @@ class MowgliModel():
                     break
 
     @torch.no_grad()
-    def early_stop(self, history: List, tol: float, nonincreasing: bool = False) -> bool:
-        """Check if the early stopping criterion is valid
-
-        Args:
-            history (List): The history of values to check.
-            tol (float): Tolerance of the value.
-
-        Returns:
-            bool: Whether one can stop early
-        """
-        # If we have a nan or infinite, die.
-        if len(history) > 0 and not torch.isfinite(history[-1]):
-            raise ValueError('Error: Loss is not finite!')
-
-        # If the history is too short, continue.
-        if len(history) < 3:
-            return False
-
-        # If the next value is worse, stop (not normal!).
-        if nonincreasing and (history[-1] - history[-3]) > tol:
-            return True
-
-        # If the next value is close enough, stop.
-        if abs(history[-1] - history[-2]) < tol:
-            return True
-
-        # Otherwise, keep on going.
-        return False
-
-    @torch.no_grad()
-    def entropy(self, X: torch.Tensor, min_one: bool = False) -> torch.Tensor:
-        """Entropy function, :math:`E(X) = \langle X, \log X - 1 \rangle`.
-
-        Args:
-            X (torch.Tensor): The parameter to compute the entropy of.
-            min_one (bool, optional): Whether to inclue the :math:`-1` in the formula.. Defaults to False.
-
-        Returns:
-            torch.Tensor:  The entropy of X.
-        """
-
-        if min_one:
-            return -torch.nan_to_num(X*(X.log()-1)).sum()
-        else:
-            return -torch.nan_to_num(X*X.log()).sum()
-
-    def entropy_dual_loss(self, Y: torch.Tensor, normalize: str) -> torch.Tensor:
-        """The dual of the entropy function.
-
-        Args:
-            Y (torch.Tensor): The dual parameter.
-
-        Returns:
-            torch.Tensor: The dual entropy loss of Y
-        """
-        if normalize == 'cols':
-            return -torch.logsumexp(Y, dim=0).sum()
-        elif normalize == 'rows':
-            return -torch.logsumexp(Y, dim=1).sum()
-        elif normalize == 'full':
-            return -torch.logsumexp(Y, dim=(0,1)).sum()
-        else:
-            return -torch.exp(Y).sum()
-    
-    def mass_transported(self, per_cell=False, per_mod=False):
-        if per_mod:
-            score = {}
-        else:
-            score = 0
-        for mod in self.A:
-            if self.lbda:
-                prod = torch.exp(-self.lbda*torch.log1p(-self.G[mod]/self.lbda)/self.eps)
-            else:
-                prod = torch.exp(self.G[mod]/self.eps)
-            prod /= self.K[mod]@prod
-
-            if per_cell:
-                s = torch.sum(self.A[mod]*prod, dim=0)
-            else:
-                s = torch.sum(self.A[mod]*prod)/self.A[mod].shape[1]
-            
-            if per_mod:
-                score[mod] = 1 - s.detach().cpu().numpy()
-            else:
-                score += (1 - s.detach().cpu().numpy())/len(self.A)
-        return score
-
-    def ot_dual_loss(self, mod: str, dim=(0, 1)) -> torch.Tensor:
-        """The dual optimal transport loss. We omit the constant entropy term.
-
-        Args:
-            A (torch.Tensor): The reference dataset
-            K (torch.Tensor): The exponentiated ground cost :math:`K=e^{-C/\epsilon}`
-            Y (torch.Tensor): The dual parameter
-
-        Returns:
-            torch.Tensor: The dual optimal transport loss of Y.
-        """
-
-        if self.lbda == None:
-            log_fG = self.G[mod]/self.eps
-        else:
-            log_fG = -(self.lbda/self.eps)*torch.log1p(-self.G[mod]/self.lbda)
-
-        # Compute the non stabilized product.
-        scale = log_fG.max(0).values
-        prod = torch.log(self.K[mod]@torch.exp(log_fG - scale)) + scale
-
-        # Compute the dot product with A.
-        loss = self.eps*torch.sum(self.mod_weight[mod]*self.A[mod]*prod, dim=dim)
-
-        del scale
-        del prod
-        
-        return loss
-
-    @torch.no_grad()
     def total_dual_loss(self) -> torch.Tensor:
         """Compute total dual loss
 
@@ -598,40 +348,6 @@ class MowgliModel():
 
         # Return the full loss.
         return loss
-    
-    def unbalanced_scores(self):
-
-        if self.lbda == 0:
-            return {mod: 0 for mod in self.H}
-        
-        scores = {}
-        
-        for mod in self.H:
-            # For large \lambda, \phi(G) is equal to \exp(G/\epsilon).
-            phi_G = torch.exp(-self.lbda*torch.log1p(-self.G[mod]/self.lbda)/self.eps)
-            
-            # Compute the second marginal of the transport plan. Ideally it should be close to HW
-            B_tilde = phi_G * (self.K[mod].T @ (self.A[mod] / (self.K[mod] @ phi_G)))
-            
-            # Check the conservation of mass.
-            mass_cons = torch.abs(B_tilde.sum(0) - self.A[mod].sum(0)).mean()
-            if mass_cons > 1e-5:
-                print('Warning. Check conservation of mass: ', mass_cons)
-            
-            # The distance between the two measures HW and \tilde B. Smaller is better!
-            mass_difference = torch.abs(self.H[mod]@self.W - B_tilde).sum(0)
-            
-            # At most, we'll destroy and create this much mass (in case of disjoint supports).
-            # It's a worst case scenario, and probably quite a loose upper bound.
-            maximum_error = (self.A[mod] + self.H[mod]@self.W).sum(0)
-            
-            # A and HW don't necessarily have the same mass, so we need to create or destroy at least this amount.
-            minimum_error = torch.abs(self.A[mod].sum(0) - (self.H[mod]@self.W).sum(0))
-            
-            # This is a score between 0 and 1. 0 means we're in the balanced case. 1 means we destroy or create everything.
-            scores[mod] = torch.median((mass_difference - minimum_error)/(maximum_error - minimum_error)).detach()
-        
-        return scores
 
     def loss_fn_h(self) -> torch.Tensor:
         """The loss for the optimization of :math:`H`
