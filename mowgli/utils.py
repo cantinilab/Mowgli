@@ -102,7 +102,10 @@ def normalize_tensor(X: torch.Tensor, normalize: str) -> torch.Tensor:
         return X/X.sum(0).mean()
 
 
-def entropy(X: torch.Tensor, min_one: bool = False) -> torch.Tensor:
+def entropy(
+    X: torch.Tensor,
+    min_one: bool = False,
+    rescale: bool = False) -> torch.Tensor:
     """Entropy function, :math:`E(X) = \langle X, \log X - 1 \rangle`.
 
     Args:
@@ -110,12 +113,16 @@ def entropy(X: torch.Tensor, min_one: bool = False) -> torch.Tensor:
             The parameter to compute the entropy of.
         min_one (bool, optional):
             Whether to inclue the :math:`-1` in the formula. Defaults to False.
+        rescale (bool, optional):
+            Rescale so that the value is between 0 and 1 (when min_one=False).
 
     Returns:
-        torch.Tensor:  The entropy of X.
+        torch.Tensor: The entropy of X.
     """
     offset = 1 if min_one else 0
-    return -torch.sum(X*(torch.nan_to_num(X.log()) - offset))
+    scale = X.shape[1]*np.log(X.shape[0]) if rescale else 1
+    return -torch.sum(X*(torch.nan_to_num(X.log()) - offset))/scale
+
 
 
 def entropy_dual_loss(Y: torch.Tensor, normalize: str) -> torch.Tensor:
