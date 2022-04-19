@@ -364,7 +364,7 @@ class MowgliModel():
         for mod in modalities:
 
             # Add the OT dual loss.
-            loss -= self.ot_dual_loss(mod)/self.n_obs
+            loss -= utils.ot_dual_loss(mod)/self.n_obs
 
             # Add the Lagrange multiplier term.
             loss += ((self.H[mod] @ self.W) * (self.mod_weight[mod]*self.G[mod])).sum()/self.n_obs
@@ -391,11 +391,11 @@ class MowgliModel():
             n = self.n_var[mod]
 
             # OT dual loss term
-            loss_h += self.ot_dual_loss(mod)/n
+            loss_h += utils.ot_dual_loss(mod)/n
             
             # Entropy dual loss term
             coef = self.rho_h/(self.latent_dim*np.log(self.n_var[mod]))
-            loss_h -= coef*self.entropy_dual_loss(-(self.mod_weight[mod]*self.G[mod])@self.W.T/(n*coef), self.normalize_H)
+            loss_h -= coef*utils.entropy_dual_loss(-(self.mod_weight[mod]*self.G[mod])@self.W.T/(n*coef), self.normalize_H)
         return loss_h
 
     def loss_fn_w(self) -> torch.Tensor:
@@ -413,11 +413,11 @@ class MowgliModel():
             htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])
 
             # OT dual loss term.
-            loss_w += self.ot_dual_loss(mod)/n
+            loss_w += utils.ot_dual_loss(mod)/n
         
         # Entropy dual loss term.
         coef = self.n_mod*self.rho_w/(self.n_obs*np.log(self.latent_dim))
-        loss_w -= coef*self.entropy_dual_loss(-htgw/(coef*n), self.normalize_W)
+        loss_w -= coef*utils.entropy_dual_loss(-htgw/(coef*n), self.normalize_W)
 
         del htgw
 
