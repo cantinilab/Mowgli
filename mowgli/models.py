@@ -9,7 +9,7 @@ from typing import Callable, List
 import muon as mu
 from tqdm import tqdm
 
-import utils
+from mowgli import utils
 
 class MowgliModel():
     
