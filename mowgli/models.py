@@ -155,24 +155,37 @@ class MowgliModel():
         del keep_idx, features
 
 
-    def train(self, mdata: mu.MuData, max_iter_inner: int = 100,
-        max_iter: int = 25, device: torch.device = 'cpu',
-        lr: float = 1, dtype: torch.dtype = torch.float,
-        tol_inner: float = 1e-9, tol_outer: float = 1e-3,
-        optim_name: str = "lbfgs") -> None:
+    def train(
+        self, mdata: mu.MuData,
+        max_iter_inner: int = 1_000, max_iter: int = 100,
+        device: torch.device = 'cpu', dtype: torch.dtype = torch.float,
+        lr: float = 1, optim_name: str = "lbfgs",
+        tol_inner: float = 1e-9, tol_outer: float = 1e-3
+        ) -> None:
         """Fit the model to the input multiomics dataset, and add the learned
         factors to the Muon object.
 
         Args:
             mdata (mu.MuData): Input dataset
-            max_iter_inner (int, optional): Maximum number of iterations for the inner loop. Defaults to 100.
-            max_iter (int, optional): Maximum number of iterations for the outer loop. Defaults to 25.
-            device (torch.device, optional): Device to do computations on. Defaults to 'cpu'.
+            max_iter_inner (int, optional):
+                Maximum number of iterations for the inner loop.
+                Defaults to 1_000.
+            max_iter (int, optional):
+                Maximum number of iterations for the outer loop.
+                Defaults to 100.
+            device (torch.device, optional):
+                Device to do computations on. Defaults to 'cpu'.
+            dtype (torch.dtype, optional):
+                Dtype of tensors. Defaults to torch.float.
             lr (float, optional): Learning rate. Defaults to 1e-2.
-            dtype (torch.dtype, optional): Dtype of tensors. Defaults to torch.float.
-            tol_inner (float, optional): Tolerance for the inner loop convergence. Defaults to 1e-5.
-            tol_outer (float, optional): Tolerance for the outer loop convergence (more tolerance is advised in the outer loop). Defaults to 1e-3.
-            optim_name (str, optional): Name of optimizer. See `build_optimizer`. Defaults to "lbfgs".
+            optim_name (str, optional):
+                Name of optimizer. See `build_optimizer`. Defaults to "lbfgs".
+            tol_inner (float, optional):
+                Tolerance for the inner loop convergence.
+                Defaults to 1e-5.
+            tol_outer (float, optional):
+                Tolerance for the outer loop convergence (more
+                tolerance is advised in the outer loop). Defaults to 1e-3.
         """
 
         # First, initialize the different parameters.
@@ -192,14 +205,17 @@ class MowgliModel():
             for _ in range(max_iter):
 
 
-                ############################## W step #############################
+                ############################## W step #########################
 
                 # Optimize the dual variable `G`.
                 # for mod in self.G:
                 #     nn.init.zeros_(self.G[mod])
                 
-                self.optimize(loss_fn=self.loss_fn_w, max_iter=max_iter_inner,
-                    history=self.losses_h, tol=tol_inner, pbar=pbar, device=device)
+                self.optimize(
+                    loss_fn=self.loss_fn_w,
+                    max_iter=max_iter_inner, tol=tol_inner,
+                    history=self.losses_h, pbar=pbar,
+                    device=device)
                 
                 # Update the shared factor `W`.
                 htgw = 0
@@ -229,23 +245,29 @@ class MowgliModel():
                         self.A, self.G, self.K, self.eps, self.lbda)
                     self.scores_history.append(scores)
 
-                ############################## H step #############################
+                ############################## H step #########################
 
                 # Optimize the dual variable `G`.
                 # for mod in self.G:
                 #     nn.init.zeros_(self.G[mod])
                 
-                self.optimize(loss_fn=self.loss_fn_h, max_iter=max_iter_inner,
-                    history=self.losses_h, tol=tol_inner, pbar=pbar, device=device)
+                self.optimize(
+                    loss_fn=self.loss_fn_h, device=device,
+                    max_iter=max_iter_inner, tol=tol_inner,
+                    history=self.losses_h, pbar=pbar)
 
                 # Update the omic specific factors `H[mod]`.
                 for mod in self.mod:
                     coef = self.latent_dim*np.log(self.n_var[mod])
                     coef /= self.n_obs*self.rho_h
                     if self.normalize_H == 'cols':
-                        self.H[mod] = F.softmin(coef*((self.mod_weight[mod]*self.G[mod])@self.W.T).detach(), dim=0)
+                        self.H[mod] = self.mod_weight[mod]*self.G[mod].detach()
+                        self.H[mod] = self.H[mod]@self.W.T
+                        self.H[mod] = F.softmin(coef*self.H[mod], dim=0)
                     else:
-                        self.H[mod] = torch.exp(-coef*((self.mod_weight[mod]*self.G[mod])@self.W.T).detach())
+                        self.H[mod] = self.mod_weight[mod]*self.G[mod].detach()
+                        self.H[mod] = self.H[mod]@self.W.T
+                        self.H[mod] = torch.exp(-coef*self.H[mod])
 
                 # Update the progress bar.
                 pbar.update(1)
@@ -266,7 +288,8 @@ class MowgliModel():
                     self.scores_history.append(scores)
 
                 # Early stopping
-                if utils.early_stop(self.losses, tol_outer, nonincreasing=True):
+                if utils.early_stop(
+                    self.losses, tol_outer, nonincreasing=True):
                     break
 
         except KeyboardInterrupt:
@@ -277,27 +300,38 @@ class MowgliModel():
             mdata[mod].uns['H_OT'] = self.H[mod].cpu().numpy()
         mdata.obsm['W_OT'] = self.W.T.cpu().numpy()
 
-    def build_optimizer(self, params, lr: float, optim_name: str) -> torch.optim.Optimizer:
+    def build_optimizer(
+        self, params,
+        lr: float, optim_name: str
+        ) -> torch.optim.Optimizer:
         """Generates the optimizer
 
         Args:
             params (Iterable of Tensors): The parameters to be optimized
             lr (float): Learning rate of the optimizer
-            optim_name (str): Name of the optimizer, among `'lbfgs'`, `'sgd'`, `'adam'`
+            optim_name (str):
+                Name of the optimizer, among `'lbfgs'`, `'sgd'`, `'adam'`
 
         Returns:
             torch.optim.Optimizer: The optimizer
         """
         if optim_name == 'lbfgs':
-            # https://discuss.pytorch.org/t/unclear-purpose-of-max-iter-kwarg-in-the-lbfgs-optimizer/65695
-            return optim.LBFGS(params, lr=lr, history_size=5, max_iter=1, line_search_fn='strong_wolfe')
+            # https://discuss.pytorch.org/t/unclear-purpose-of-max-iter
+            # -kwarg-in-the-lbfgs-optimizer/65695
+            return optim.LBFGS(
+                params, lr=lr,
+                history_size=5,
+                max_iter=1,
+                line_search_fn='strong_wolfe')
         elif optim_name == 'sgd':
             return optim.SGD(params, lr=lr)
         elif optim_name == 'adam':
             return optim.Adam(params, lr=lr)
 
-    def optimize(self, loss_fn: Callable,
-                 max_iter: int, history: List, tol: float, pbar: None, device: str) -> None:
+    def optimize(
+        self, loss_fn: Callable,
+        max_iter: int, history: List,
+        tol: float, pbar: None, device: str) -> None:
         """Optimize the dual variable based on the provided loss function
 
         Args:
@@ -314,7 +348,10 @@ class MowgliModel():
             lr=self.lr, optim_name=self.optim_name)
 
         # This value will be displayed in the progress bar
-        total_loss = self.losses[-1].cpu().numpy() if len(self.losses) > 0 else '?'
+        if len(self.losses) > 0:
+            total_loss = self.losses[-1].cpu().numpy()
+        else:
+            total_loss = '?'
 
         # This is the main optimization loop.
         for i in range(max_iter):
@@ -333,13 +370,14 @@ class MowgliModel():
             if i % 10 == 0:
                 # Add a value to the loss history.
                 history.append(loss_fn().cpu().detach())
+                gpu_mem_alloc = torch.cuda.memory_allocated(device=device)
 
                 pbar.set_postfix({
                     'loss': total_loss,
                     'mass_transported': self.scores_history[-1],
                     'loss_inner': history[-1].cpu().numpy(),
                     'inner_steps': i,
-                    'gpu_memory_allocated': torch.cuda.memory_allocated(device=device)
+                    'gpu_memory_allocated': gpu_mem_alloc
                 })
 
                 # Attempt early stopping
@@ -364,18 +402,24 @@ class MowgliModel():
         for mod in modalities:
 
             # Add the OT dual loss.
-            loss -= utils.ot_dual_loss(mod)/self.n_obs
+            loss -= utils.ot_dual_loss(
+                self.A[mod], self.G[mod], self.K[mod],
+                self.eps, self.lbda,
+                self.mod_weight[mod])/self.n_obs
 
             # Add the Lagrange multiplier term.
-            loss += ((self.H[mod] @ self.W) * (self.mod_weight[mod]*self.G[mod])).sum()/self.n_obs
+            lagrange = self.H[mod]@self.W
+            lagrange *= self.mod_weight[mod]*self.G[mod]
+            lagrange = lagrange.sum()
+            loss += lagrange/self.n_obs
 
             # Add the `H[mod]` entropy term.
             coef = self.rho_h/(self.latent_dim*np.log(self.n_var[mod]))
-            loss -= coef*self.entropy(self.H[mod], min_one=True)
+            loss -= coef*utils.entropy(self.H[mod], min_one=True)
 
         # Add the `W` entropy term.
         coef = self.n_mod*self.rho_w/(self.n_obs*np.log(self.latent_dim))
-        loss -= coef*self.entropy(self.W, min_one=True)
+        loss -= coef*utils.entropy(self.W, min_one=True)
 
         # Return the full loss.
         return loss
@@ -388,14 +432,18 @@ class MowgliModel():
         """
         loss_h = 0
         for mod in self.mod:
-            n = self.n_var[mod]
 
             # OT dual loss term
-            loss_h += utils.ot_dual_loss(mod)/n
+            loss_h += utils.ot_dual_loss(
+                self.A[mod], self.G[mod], self.K[mod],
+                self.eps, self.lbda,
+                self.mod_weight[mod])/self.n_obs
             
             # Entropy dual loss term
             coef = self.rho_h/(self.latent_dim*np.log(self.n_var[mod]))
-            loss_h -= coef*utils.entropy_dual_loss(-(self.mod_weight[mod]*self.G[mod])@self.W.T/(n*coef), self.normalize_H)
+            gwt = self.mod_weight[mod]*self.G[mod]@self.W.T
+            gwt /= self.n_obs*coef
+            loss_h -= coef*utils.entropy_dual_loss(-gwt, self.normalize_H)
         return loss_h
 
     def loss_fn_w(self) -> torch.Tensor:
@@ -404,20 +452,24 @@ class MowgliModel():
         Returns:
             torch.Tensor: The loss
         """
-        loss_w = 0
-        htgw = 0
+        loss_w, htgw = 0, 0
+
         for mod in self.mod:
-            n = self.n_var[mod]
 
             # For the entropy dual loss term.
             htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])
 
             # OT dual loss term.
-            loss_w += utils.ot_dual_loss(mod)/n
+            loss_w += utils.ot_dual_loss(
+                self.A[mod], self.G[mod], self.K[mod],
+                self.eps, self.lbda,
+                self.mod_weight[mod])/self.n_obs
         
         # Entropy dual loss term.
-        coef = self.n_mod*self.rho_w/(self.n_obs*np.log(self.latent_dim))
-        loss_w -= coef*utils.entropy_dual_loss(-htgw/(coef*n), self.normalize_W)
+        coef = self.n_mod*self.rho_w
+        coef /= self.n_obs*np.log(self.latent_dim)
+        htgw /= coef*self.n_obs
+        loss_w -= coef*utils.entropy_dual_loss(-htgw, self.normalize_W)
 
         del htgw
 
