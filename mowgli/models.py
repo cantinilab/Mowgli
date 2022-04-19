@@ -102,7 +102,7 @@ class MowgliModel():
 
         # Initialize the loss and statistics histories.
         self.losses_w, self.losses_h, self.losses = [], [], []
-        self.scores_history = [0]
+        self.scores_history = [0] # TODO: change this
 
         # Initialize the dictionaries containing matrices for each omics.
         self.A, self.H, self.G, self.K = {}, {}, {}, {}

@@ -1,4 +1,4 @@
-# Single-cell multi-omics integration with Optimal Transport
+# Mowgli: Multi Omics Wasserstein inteGrative anaLysIs
 
 **Install package**
 
@@ -7,12 +7,10 @@
 
 **Import package**
 
-    from scmiot import models, pl
-
-**Conda environment**: `environment.yml` (in particular, relies on pytorch, scanpy and muon)
+    from mowgli import *
 
 **Datasets**: since the data is too big to be hosted on github, please download and unzip the file `datasets.zip` available at https://hub.bio.ens.psl.eu/index.php/s/wyKyyTPTXAww4nQ/download
 
-**Vignettes**: separate files for preprocessing, and application of OT-NMF
+**Vignettes**: application of Mowgli to cell lines and PBMC.
 
-**Tool**: in folder `scmiot/`, `models.py` contains models, and `pl.py` plotting functions
+**Tool**: in folder `mowgli/`, `models.py` contains models, and `pl.py` plotting functions
