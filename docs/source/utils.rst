@@ -1,7 +1,7 @@
-mowgli.tl
+mowgli.utils
 ----------------
 
-.. automodule:: mowgli.tl
+.. automodule:: mowgli.utils
    :members:
    :undoc-members:
    :show-inheritance:
