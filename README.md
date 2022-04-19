@@ -2,8 +2,8 @@
 
 **Install package**
 
-    git clone git@github.com:gjhuizing/OT-scIntegration.git
-    pip install ./OT-scIntegration/
+    git clone git@github.com:gjhuizing/Mowgli.git
+    pip install ./Mowgli/
 
 **Import package**
 
