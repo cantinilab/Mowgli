@@ -2,10 +2,10 @@
 
 from setuptools import setup, find_packages
 
-setup(name='scmiot',
+setup(name='mowgli',
       version='0.0.1',
-      description='Single-cell multi-omics integration with optimal transport',
+      description='Mowgli: Multi Omics Wasserstein inteGrative anaLysIs.',
       author='Geert-Jan Huizing',
       author_email='huizing@ens.fr',
-      packages=['scmiot'],
+      packages=['mowgli'],
     )
