@@ -9,6 +9,8 @@ from typing import Callable, List
 import muon as mu
 from tqdm import tqdm
 
+import utils
+
 class MowgliModel():
     
     def __init__(
@@ -31,6 +33,7 @@ class MowgliModel():
         if lbda != None:
             assert(lbda > 0)
         else:
+            assert(normalize_A == 'cols')
             assert(normalize_H == 'cols')
             assert(normalize_W == 'cols')
 
@@ -47,6 +50,9 @@ class MowgliModel():
         self.cost = cost
         self.cost_path = cost_path
         self.pca_cost = pca_cost
+
+        # Create new attributes.
+        self.mod_weight = {}
 
         # Initialize the loss and statistics histories.
         self.losses_w, self.losses_h, self.losses = [], [], []
@@ -67,20 +73,30 @@ class MowgliModel():
             mdata (mu.MuData): Input dataset
             dtype (torch.dtype): Dtype for the output
             device (torch.device): Device for the output
-            force_recompute (bool, optional): Where to recompute the cost even if there is a matrix precomputed. Defaults to False.
+            force_recompute (bool, optional):
+                Where to recompute the cost even if there
+                is a matrix precomputed. Defaults to False.
         """
 
-        # classical_nmf = NMF(n_components=self.latent_dim, init = "nndsvd", max_iter=1)
-
-        self.mod_weight = {}
+        # Set some attributes.
+        self.mod = mdata.mod
+        self.n_mod = mdata.n_mod
+        self.n_obs = mdata.n_obs
+        self.n_var = {}
 
         # For each modality,
-        for mod in mdata.mod:
+        for mod in self.mod:
+            
+            ################### Define the modality weights ###################
 
             if self.use_mod_weight:
-                self.mod_weight[mod] = torch.Tensor(mdata.obs[mod + ':mod_weight'].to_numpy()).to(dtype=dtype, device=device).reshape(1, -1)
+                mod_weight = mdata.obs[mod + ':mod_weight'].to_numpy()
+                mod_weight = torch.Tensor(mod_weight).reshape(1, -1)
+                mod_weight = mod_weight.to(dtype=dtype, device=device)
+                self.mod_weight[mod] = mod_weight
             else:
-                self.mod_weight[mod] = torch.ones(1, mdata.n_obs, dtype=dtype, device=device)
+                self.mod_weight[mod] = torch.ones(
+                    1, self.n_obs, dtype=dtype, device=device)
 
             ################ Generate the reference dataset A. ################
 
@@ -88,9 +104,10 @@ class MowgliModel():
             keep_idx = mdata[mod].var['highly_variable'].to_numpy()
 
             # Make the reference dataset.
-            self.A[mod] = self.reference_dataset(
+            self.A[mod] = utils.reference_dataset(
                 mdata[mod].X, dtype, device, keep_idx)
-
+            self.n_var[mod] = self.A[mod].shape[0]
+            
 
             ################# Normalize the reference dataset #################
 
@@ -115,33 +132,34 @@ class MowgliModel():
                 pca = PCA(n_components=self.latent_dim)
                 features = pca.fit_transform(features)
 
-            self.K[mod] = self.compute_ground_cost(
-                features, cost, force_recompute,
+            self.K[mod] = utils.compute_ground_cost(
+                features, cost, self.eps, force_recompute,
                 cost_path, dtype, device)
 
             ####################### Initialize matrices #######################
 
             # Initialize the factor `H`.
-            # self.H[mod] = torch.Tensor(classical_nmf.fit_transform(self.A[mod].cpu())).to(device=device, dtype=dtype)
-            self.H[mod] = torch.rand(self.A[mod].shape[0], self.latent_dim, device=device, dtype=dtype)
-            self.H[mod] = self.normalize_tensor(self.H[mod], self.normalize_H)
+            self.H[mod] = torch.rand(
+                self.n_var[mod], self.latent_dim, device=device, dtype=dtype)
+            
+            self.H[mod] = utils.normalize_tensor(self.H[mod], self.normalize_H)
 
             # Initialize the dual variable `G`
             self.G[mod] = torch.zeros_like(self.A[mod], requires_grad=True)
 
         # Initialize the shared factor `W`
-        # self.W = torch.Tensor(classical_nmf.components_).to(device=device, dtype=dtype)
-        self.W = torch.rand(self.latent_dim, self.A[mod].shape[1], device=device, dtype=dtype)
-        self.W = self.normalize_tensor(self.W, self.normalize_W)
+        self.W = torch.rand(
+            self.latent_dim, self.n_obs, device=device, dtype=dtype)
+        self.W = utils.normalize_tensor(self.W, self.normalize_W)
         
         del keep_idx, features
 
 
     def train(self, mdata: mu.MuData, max_iter_inner: int = 100,
-                      max_iter: int = 25, device: torch.device = 'cpu',
-                      lr: float = 1, dtype: torch.dtype = torch.float,
-                      tol_inner: float = 1e-9, tol_outer: float = 1e-3,
-                      optim_name: str = "lbfgs") -> None:
+        max_iter: int = 25, device: torch.device = 'cpu',
+        lr: float = 1, dtype: torch.dtype = torch.float,
+        tol_inner: float = 1e-9, tol_outer: float = 1e-3,
+        optim_name: str = "lbfgs") -> None:
         """Fit the model to the input multiomics dataset, and add the learned
         factors to the Muon object.
 
@@ -185,9 +203,9 @@ class MowgliModel():
                 
                 # Update the shared factor `W`.
                 htgw = 0
-                for mod in mdata.mod:
+                for mod in self.mod:
                     htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])
-                coef = np.log(self.W.shape[0])/(len(mdata.mod)*self.rho_w)
+                coef = np.log(self.latent_dim)/(self.n_mod*self.rho_w)
                 if self.normalize_W == 'cols':
                     self.W = F.softmin(coef*htgw.detach(), dim=0)
                 else:
@@ -201,9 +219,15 @@ class MowgliModel():
                 self.losses.append(self.total_dual_loss().cpu().detach())
 
                 if self.lbda:
-                    self.scores_history.append(self.unbalanced_scores())
+                    scores = utils.unbalanced_scores(
+                        self.A, self.K, self.G,
+                        self.H, self.W,
+                        self.eps, self.lbda)
+                    self.scores_history.append(scores)
                 else:
-                    self.scores_history.append(self.mass_transported())
+                    scores = utils.mass_transported(
+                        self.A, self.G, self.K, self.eps, self.lbda)
+                    self.scores_history.append(scores)
 
                 ############################## H step #############################
 
@@ -215,9 +239,9 @@ class MowgliModel():
                     history=self.losses_h, tol=tol_inner, pbar=pbar, device=device)
 
                 # Update the omic specific factors `H[mod]`.
-                for mod in mdata.mod:
-                    coef = self.W.shape[0]*np.log(self.H[mod].shape[0])
-                    coef /= self.W.shape[1]*self.rho_h
+                for mod in self.mod:
+                    coef = self.latent_dim*np.log(self.n_var[mod])
+                    coef /= self.n_obs*self.rho_h
                     if self.normalize_H == 'cols':
                         self.H[mod] = F.softmin(coef*((self.mod_weight[mod]*self.G[mod])@self.W.T).detach(), dim=0)
                     else:
@@ -229,20 +253,27 @@ class MowgliModel():
                 # Save the total dual loss.
                 self.losses.append(self.total_dual_loss().cpu().detach())
 
+                # TODO refactor this
                 if self.lbda:
-                    self.scores_history.append(self.unbalanced_scores())
+                    scores = utils.unbalanced_scores(
+                        self.A, self.K, self.G,
+                        self.H, self.W,
+                        self.eps, self.lbda)
+                    self.scores_history.append(scores)
                 else:
-                    self.scores_history.append(self.mass_transported())
+                    scores = utils.mass_transported(
+                        self.A, self.G, self.K, self.eps, self.lbda)
+                    self.scores_history.append(scores)
 
                 # Early stopping
-                if self.early_stop(self.losses, tol_outer, nonincreasing=True):
+                if utils.early_stop(self.losses, tol_outer, nonincreasing=True):
                     break
 
         except KeyboardInterrupt:
             print('Training interrupted.')
 
         # Add H and W to the MuData object.
-        for mod in mdata.mod:
+        for mod in self.mod:
             mdata[mod].uns['H_OT'] = self.H[mod].cpu().numpy()
         mdata.obsm['W_OT'] = self.W.T.cpu().numpy()
 
@@ -312,7 +343,7 @@ class MowgliModel():
                 })
 
                 # Attempt early stopping
-                if self.early_stop(history, tol):
+                if utils.early_stop(history, tol):
                     break
 
     @torch.no_grad()
@@ -327,23 +358,23 @@ class MowgliModel():
         loss = 0
 
         # Recover the modalities (omics).
-        modalities = self.A.keys()
+        modalities = self.mod
 
         # For each modality,
         for mod in modalities:
 
             # Add the OT dual loss.
-            loss -= self.ot_dual_loss(mod)/self.W.shape[1]
+            loss -= self.ot_dual_loss(mod)/self.n_obs
 
             # Add the Lagrange multiplier term.
-            loss += ((self.H[mod] @ self.W) * (self.mod_weight[mod]*self.G[mod])).sum()/self.W.shape[1]
+            loss += ((self.H[mod] @ self.W) * (self.mod_weight[mod]*self.G[mod])).sum()/self.n_obs
 
             # Add the `H[mod]` entropy term.
-            coef = self.rho_h/(self.H[mod].shape[1]*np.log(self.H[mod].shape[0]))
+            coef = self.rho_h/(self.latent_dim*np.log(self.n_var[mod]))
             loss -= coef*self.entropy(self.H[mod], min_one=True)
 
         # Add the `W` entropy term.
-        coef = len(modalities)*self.rho_w/(self.W.shape[1]*np.log(self.W.shape[0]))
+        coef = self.n_mod*self.rho_w/(self.n_obs*np.log(self.latent_dim))
         loss -= coef*self.entropy(self.W, min_one=True)
 
         # Return the full loss.
@@ -356,14 +387,14 @@ class MowgliModel():
             torch.Tensor: The loss
         """
         loss_h = 0
-        for mod in self.A.keys():
-            n = self.A[mod].shape[1]
+        for mod in self.mod:
+            n = self.n_var[mod]
 
             # OT dual loss term
             loss_h += self.ot_dual_loss(mod)/n
             
             # Entropy dual loss term
-            coef = self.rho_h/(self.H[mod].shape[1]*np.log(self.H[mod].shape[0]))
+            coef = self.rho_h/(self.latent_dim*np.log(self.n_var[mod]))
             loss_h -= coef*self.entropy_dual_loss(-(self.mod_weight[mod]*self.G[mod])@self.W.T/(n*coef), self.normalize_H)
         return loss_h
 
@@ -375,8 +406,8 @@ class MowgliModel():
         """
         loss_w = 0
         htgw = 0
-        for mod in self.A.keys():
-            n = self.A[mod].shape[1]
+        for mod in self.mod:
+            n = self.n_var[mod]
 
             # For the entropy dual loss term.
             htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])
@@ -385,7 +416,7 @@ class MowgliModel():
             loss_w += self.ot_dual_loss(mod)/n
         
         # Entropy dual loss term.
-        coef = len(self.A.keys())*self.rho_w/(self.W.shape[1]*np.log(self.W.shape[0]))
+        coef = self.n_mod*self.rho_w/(self.n_obs*np.log(self.latent_dim))
         loss_w -= coef*self.entropy_dual_loss(-htgw/(coef*n), self.normalize_W)
 
         del htgw
