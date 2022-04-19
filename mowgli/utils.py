@@ -1,9 +1,10 @@
-from typing import Iterable, List
+from typing import Dict, Iterable, List
 import torch
 from scipy.spatial.distance import cdist
 import numpy as np
 
-def reference_dataset(X, dtype: torch.dtype, device: torch.device,
+def reference_dataset(
+    X, dtype: torch.dtype, device: torch.device,
     keep_idx: Iterable) -> torch.Tensor:
     """Select features, transpose dataset and convert to Tensor.
 
@@ -29,9 +30,12 @@ def reference_dataset(X, dtype: torch.dtype, device: torch.device,
     # Send the matrix `A` to PyTorch.
     return torch.from_numpy(A).to(device=device, dtype=dtype).contiguous()
 
-def compute_ground_cost(features, cost: str, eps: float,
-    force_recompute: bool, cost_path: str, dtype: torch.dtype,
-    device: torch.device) -> torch.Tensor:
+
+def compute_ground_cost(
+    features, cost: str, eps: float,
+    force_recompute: bool, cost_path: str,
+    dtype: torch.dtype, device: torch.device
+    ) -> torch.Tensor:
     """Compute the ground cost (not lazily!)
 
     Args:
@@ -77,7 +81,17 @@ def compute_ground_cost(features, cost: str, eps: float,
     
     return K
 
-def normalize_tensor(X: torch.Tensor, normalize: str):
+
+def normalize_tensor(X: torch.Tensor, normalize: str) -> torch.Tensor:
+    """Normalize a tensor along columns, rows or nothing.
+
+    Args:
+        X (torch.Tensor): The tensor to normalize.
+        normalize (str): The direction to normalize on.
+
+    Returns:
+        torch.Tensor: The normalized tensor.
+    """    
     if normalize == 'cols':
         return X/X.sum(0)
     elif normalize == 'rows':
@@ -87,23 +101,34 @@ def normalize_tensor(X: torch.Tensor, normalize: str):
     else:
         return X/X.sum(0).mean()
 
+
 def entropy(X: torch.Tensor, min_one: bool = False) -> torch.Tensor:
     """Entropy function, :math:`E(X) = \langle X, \log X - 1 \rangle`.
 
     Args:
-        X (torch.Tensor): The parameter to compute the entropy of.
-        min_one (bool, optional): Whether to inclue the :math:`-1` in the formula.. Defaults to False.
+        X (torch.Tensor):
+            The parameter to compute the entropy of.
+        min_one (bool, optional):
+            Whether to inclue the :math:`-1` in the formula. Defaults to False.
 
     Returns:
         torch.Tensor:  The entropy of X.
     """
+    offset = 1 if min_one else 0
+    return -torch.sum(X*(torch.nan_to_num(X.log()) - offset))
 
-    if min_one:
-        return -torch.nan_to_num(X*(X.log()-1)).sum() # TODO: nantonum differentely ?
-    else:
-        return -torch.nan_to_num(X*X.log()).sum()
 
 def entropy_dual_loss(Y: torch.Tensor, normalize: str) -> torch.Tensor:
+    """Compute the Legendre dual of the entropy. This depends on the
+    normalization constraint.
+
+    Args:
+        Y (torch.Tensor): The input parameter.
+        normalize (str): The normalization constraint for the input parameter.
+
+    Returns:
+        torch.Tensor: The loss.
+    """    
     if normalize == 'cols':
         return -torch.logsumexp(Y, dim=0).sum()
     elif normalize == 'rows':
@@ -113,30 +138,72 @@ def entropy_dual_loss(Y: torch.Tensor, normalize: str) -> torch.Tensor:
     else:
         return -torch.exp(Y).sum()
 
-def mass_transported(A, G, K, eps, lbda, per_cell=False, per_mod=False):
-    if per_mod:
-        score = {}
-    else:
-        score = 0
+
+def mass_transported(
+    A: dict, G: dict, K: dict,
+    eps: float, lbda: float,
+    per_cell: bool = False, per_mod: bool = False):
+    """Compute the amount of mass transported, i.e. the mass outside of
+    the diagonal in the transport plan.
+
+    Args:
+        A (dict): The dataset.
+        G (dict): The dual variable.
+        K (dict): The kernel.
+        eps (_type_): The OT entropic regularization.
+        lbda (_type_): The unbalanced relaxation.
+        per_cell (bool, optional): Whether to return for each cell separately. Defaults to False.
+        per_mod (bool, optional): Whether to return for each modality separately. Defaults to False.
+
+    Returns: The mass transported (dictionary of array).
+    """    
+    score = {} if per_mod else 0
     for mod in A:
+
+        # When lbda tends to infinity, these lines are equivalent.
         if lbda:
             prod = torch.exp(-lbda*torch.log1p(-G[mod]/lbda)/eps)
         else:
             prod = torch.exp(G[mod]/eps)
         prod /= K[mod]@prod
 
+        # Compute per cell or summing everything.
         if per_cell:
             s = torch.sum(A[mod]*prod, dim=0)
         else:
             s = torch.sum(A[mod]*prod)/A[mod].shape[1]
         
+        # Compute the modality of summing everything.
         if per_mod:
             score[mod] = 1 - s.detach().cpu().numpy()
         else:
             score += (1 - s.detach().cpu().numpy())/len(A)
-        return score
+        
+    return score
 
-def ot_dual_loss(A, G, K, eps, lbda, mod_weights, dim=(0, 1)) -> torch.Tensor:
+
+def ot_dual_loss(
+    A: dict, G: dict, K: dict,
+    eps: float, lbda: float,
+    mod_weights: torch.Tensor,
+    dim=(0, 1)
+    ) -> torch.Tensor:
+    """Compute the Legendre dual of the entropic unbalanced OT loss.
+
+    Args:
+        A (dict): The input data.
+        G (dict): The dual variable.
+        K (dict): The kernel.
+        eps (float): The entropic regularization.
+        lbda (float): The unbalanced relaxation.
+        mod_weights (torch.Tensor): The weights per cell and modality.
+        dim (tuple, optional): How to sum the loss. Defaults to (0, 1).
+
+    Returns:
+        torch.Tensor: The loss
+    """    
+
+    # When lambda tends to infinity, these lines are quivalent.
     if lbda == None:
         log_fG = G/eps
     else:
@@ -149,7 +216,27 @@ def ot_dual_loss(A, G, K, eps, lbda, mod_weights, dim=(0, 1)) -> torch.Tensor:
     # Compute the dot product with A.
     return eps*torch.sum(mod_weights*A*prod, dim=dim)
 
-def unbalanced_scores(A, K, G, H, W, eps, lbda):
+
+def unbalanced_scores(
+    A: dict, K: dict, G: dict,
+    H: dict, W: torch.Tensor,
+    eps: float, lbda: float) -> dict:
+    """Compute the "unbalancedness" of the result. The score is between 0
+    (completely balanced transport) and 1 (all the possible mass is created).
+
+    Args:
+        A (dict): The input data.
+        K (dict): The kernel.
+        G (dict): The dual variable.
+        H (dict): The dictionary.
+        W (torch.Tensor): The embeddings.
+        eps (float): The entropic regularization.
+        lbda (float): The unbalanced relaxation.
+
+    Returns:
+        dict: The score for each modality.
+    """    
+
     if lbda == 0:
         return {mod: 0 for mod in H}
     
@@ -159,7 +246,8 @@ def unbalanced_scores(A, K, G, H, W, eps, lbda):
         # For large \lambda, \phi(G) is equal to \exp(G/\epsilon).
         phi_G = torch.exp(-lbda*torch.log1p(-G[mod]/lbda)/eps)
         
-        # Compute the second marginal of the transport plan. Ideally it should be close to HW
+        # Compute the second marginal of the transport plan.
+        # Ideally it should be close to HW
         B_tilde = phi_G * (K[mod].T @ (A[mod] / (K[mod] @ phi_G)))
         
         # Check the conservation of mass.
@@ -167,22 +255,45 @@ def unbalanced_scores(A, K, G, H, W, eps, lbda):
         if mass_cons > 1e-5:
             print('Warning. Check conservation of mass: ', mass_cons)
         
-        # The distance between the two measures HW and \tilde B. Smaller is better!
+        # The distance between the two measures HW and \tilde B.
+        # Smaller is better!
         mass_difference = torch.abs(H[mod]@W - B_tilde).sum(0)
         
-        # At most, we'll destroy and create this much mass (in case of disjoint supports).
+        # At most, we'll destroy and create this much mass
+        # (in case of disjoint supports).
         # It's a worst case scenario, and probably quite a loose upper bound.
         maximum_error = (A[mod] + H[mod]@W).sum(0)
         
-        # A and HW don't necessarily have the same mass, so we need to create or destroy at least this amount.
+        # A and HW don't necessarily have the same mass, so we need to
+        # create or destroy at least this amount.
         minimum_error = torch.abs(A[mod].sum(0) - (H[mod]@W).sum(0))
         
-        # This is a score between 0 and 1. 0 means we're in the balanced case. 1 means we destroy or create everything.
-        scores[mod] = torch.median((mass_difference - minimum_error)/(maximum_error - minimum_error)).detach()
+        # This is a score between 0 and 1. 0 means we're in the balanced
+        # case. 1 means we destroy or create everything.
+        scores[mod] = mass_difference - minimum_error
+        scores[mod] /= maximum_error - minimum_error
+        scores[mod] = torch.median(scores[mod]).detach()
     
     return scores
 
+
 def early_stop(history: List, tol: float, nonincreasing: bool = False) -> bool:
+    """Based on a history and a tolerance, whether to stop early or not.
+
+    Args:
+        history (List):
+            The loss history.
+        tol (float):
+            The tolerance before early stopping.
+        nonincreasing (bool, optional):
+            When False, throws an error if the loss goes up. Defaults to False.
+
+    Raises:
+        ValueError: When the loss goes up.
+
+    Returns:
+        bool: Whether to stop early.
+    """    
     # If we have a nan or infinite, die.
     if len(history) > 0 and not torch.isfinite(history[-1]):
         raise ValueError('Error: Loss is not finite!')
