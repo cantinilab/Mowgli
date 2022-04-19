@@ -24,6 +24,52 @@ class MowgliModel():
         normalize_A: str = 'cols',
         normalize_H: str = 'cols',
         normalize_W: str = 'cols'):
+        """Initialize the Mowgli model, which performs integrative NMF with an
+        Optimal Transport loss.
+
+        Args:
+            latent_dim (int, optional):
+                The latent dimension of the model. Defaults to 15.
+            use_mod_weight (bool, optional):
+                Whether to use a different weight for each modality and each
+                cell. If `True`, the weights are expected in the `mod_weight`
+                obs field of each modality. Defaults to False.
+            rho_h (float, optional):
+                The entropy parameter for the dictionary. Small values mean
+                sparse dictionaries. Defaults to 5e-2.
+            rho_w (float, optional):
+                The entropy parameter for the embedding. Small values mean
+                sparse vectors. Defaults to 5e-2.
+            eps (float, optional):
+                The entropy parameter for epsilon transport. Large values
+                decrease importance of individual genes. Defaults to 5e-2.
+            lbda (float, optional):
+                The unbalanced parameter. If set, it should be greater than
+                0. Allows to work with not-normalized vectors but is less
+                stable. We thus advise not using it. Defaults to None.
+            cost (str, optional):
+                The function used to compute an emprical ground cost. All
+                metrics from Scipy's `cdist` are allowed. Defaults to 'cosine'.
+            pca_cost (bool, optional):
+                If True, the emprical ground cost will be computed on PCA
+                embeddings rather than raw data. Defaults to False.
+            cost_path (dict, optional):
+                Will look for an existing cost as a `.npy` file at this
+                path. If not found, the cost will be computed then saved
+                there. Defaults to None.
+            normalize_A (str, optional):
+                Whether to normalize the dataset. If False, `lbda` must
+                be set and greater than 0. This is less stable so not advised.
+                Defaults to 'cols'.
+            normalize_H (str, optional):
+                Whether to normalize the dictionary. If False, `lbda` must
+                be set and greater than 0. This is less stable so not advised.
+                Defaults to 'cols'.
+            normalize_W (str, optional):
+                Whether to normalize the embeddings. If False, `lbda` must
+                be set and greater than 0. This is less stable so not advised.
+                Defaults to 'cols'.
+        """        
 
         # Check that the user-defined parameters are valid.
         assert(latent_dim > 0)
@@ -61,22 +107,25 @@ class MowgliModel():
         # Initialize the dictionaries containing matrices for each omics.
         self.A, self.H, self.G, self.K = {}, {}, {}, {}
 
+
     def init_parameters(
         self,
         mdata: mu.MuData,
         dtype: torch.dtype, device: torch.device,
         force_recompute: bool = False
         ) -> None:
-        """Initialize the parameters for the model
+        """Initialize parameters based on input data.
 
         Args:
-            mdata (mu.MuData): Input dataset
-            dtype (torch.dtype): Dtype for the output
-            device (torch.device): Device for the output
+            mdata (mu.MuData):
+                The input MuData object.
+            dtype (torch.dtype):
+                The dtype to work with.
+            device (torch.device):
+                The device to work on.
             force_recompute (bool, optional):
-                Where to recompute the cost even if there
-                is a matrix precomputed. Defaults to False.
-        """
+                Whether to recompute the ground cost. Defaults to False.
+        """        
 
         # Set some attributes.
         self.mod = mdata.mod
@@ -87,8 +136,7 @@ class MowgliModel():
         # For each modality,
         for mod in self.mod:
             
-            ################### Define the modality weights ###################
-
+            # Define the modality weights.
             if self.use_mod_weight:
                 mod_weight = mdata.obs[mod + ':mod_weight'].to_numpy()
                 mod_weight = torch.Tensor(mod_weight).reshape(1, -1)
@@ -98,8 +146,6 @@ class MowgliModel():
                 self.mod_weight[mod] = torch.ones(
                     1, self.n_obs, dtype=dtype, device=device)
 
-            ################ Generate the reference dataset A. ################
-
             # Select the highly variable features.
             keep_idx = mdata[mod].var['highly_variable'].to_numpy()
 
@@ -108,50 +154,46 @@ class MowgliModel():
                 mdata[mod].X, dtype, device, keep_idx)
             self.n_var[mod] = self.A[mod].shape[0]
             
-
-            ################# Normalize the reference dataset #################
-
-            # Add a small value for numerical stability, and normalize `A^T`.
+            # Normalize the reference dataset, and add a small value
+            # for numerical stability.
             self.A[mod] += 1e-6
             if self.normalize_A == 'cols':
                 self.A[mod] /= self.A[mod].sum(0)
             else:
                 self.A[mod] /= self.A[mod].sum(0).mean()
 
-            ####################### Compute ground cost #######################
-
-            # Use the specified cost function to compute ground cost.
+            # Determine which cost function to use.
             cost = self.cost if isinstance(self.cost, str) else self.cost[mod]
             try:
                 cost_path = self.cost_path[mod]
             except:
                 cost_path = None
 
+            # Define the features that the ground cost will be computed on.
             features = 1e-6 + self.A[mod].cpu().numpy()
             if self.pca_cost:
                 pca = PCA(n_components=self.latent_dim)
                 features = pca.fit_transform(features)
 
+            # Compute ground cost, using the specified cost function.
             self.K[mod] = utils.compute_ground_cost(
                 features, cost, self.eps, force_recompute,
                 cost_path, dtype, device)
 
-            ####################### Initialize matrices #######################
-
-            # Initialize the factor `H`.
+            # Initialize the matrices `H`, which should be normalized.
             self.H[mod] = torch.rand(
                 self.n_var[mod], self.latent_dim, device=device, dtype=dtype)
-            
             self.H[mod] = utils.normalize_tensor(self.H[mod], self.normalize_H)
 
             # Initialize the dual variable `G`
             self.G[mod] = torch.zeros_like(self.A[mod], requires_grad=True)
 
-        # Initialize the shared factor `W`
+        # Initialize the shared factor `W`, which should be normalized.
         self.W = torch.rand(
             self.latent_dim, self.n_obs, device=device, dtype=dtype)
         self.W = utils.normalize_tensor(self.W, self.normalize_W)
         
+        # Clean up.
         del keep_idx, features
 
 
@@ -162,31 +204,34 @@ class MowgliModel():
         lr: float = 1, optim_name: str = "lbfgs",
         tol_inner: float = 1e-9, tol_outer: float = 1e-3
         ) -> None:
-        """Fit the model to the input multiomics dataset, and add the learned
-        factors to the Muon object.
+        """Train the Mowgli model on an input MuData object.
 
         Args:
-            mdata (mu.MuData): Input dataset
+            mdata (mu.MuData):
+                The input MuData object.?
             max_iter_inner (int, optional):
-                Maximum number of iterations for the inner loop.
-                Defaults to 1_000.
+                How many iterations for the inner optimization loop 
+                (optimizing H, or W). Defaults to 1_000.
             max_iter (int, optional):
-                Maximum number of iterations for the outer loop.
-                Defaults to 100.
+                How many interations for the outer optimization loop (how
+                many successive optimizations of H and W). Defaults to 100.
             device (torch.device, optional):
-                Device to do computations on. Defaults to 'cpu'.
+                The device to work on. Defaults to 'cpu'.
             dtype (torch.dtype, optional):
-                Dtype of tensors. Defaults to torch.float.
-            lr (float, optional): Learning rate. Defaults to 1e-2.
+                The dtype to work with. Defaults to torch.float.
+            lr (float, optional):
+                The learning rate for the optimizer. The default is set
+                for LBFGS and should be changed otherwise. Defaults to 1.
             optim_name (str, optional):
-                Name of optimizer. See `build_optimizer`. Defaults to "lbfgs".
+                The optimizer to use (`lbfgs`, `sgd` or `adam`). LBFGS
+                is advised, but requires more memory. Defaults to "lbfgs".
             tol_inner (float, optional):
-                Tolerance for the inner loop convergence.
-                Defaults to 1e-5.
+                The tolerance for the inner iterations before early stopping.
+                Defaults to 1e-9.
             tol_outer (float, optional):
-                Tolerance for the outer loop convergence (more
-                tolerance is advised in the outer loop). Defaults to 1e-3.
-        """
+                The tolerance for the outer iterations before early stopping.
+                Defaults to 1e-3.
+        """        
 
         # First, initialize the different parameters.
         self.init_parameters(mdata, dtype=dtype, device=device)
@@ -204,13 +249,7 @@ class MowgliModel():
         try:
             for _ in range(max_iter):
 
-
-                ############################## W step #########################
-
-                # Optimize the dual variable `G`.
-                # for mod in self.G:
-                #     nn.init.zeros_(self.G[mod])
-                
+                # Perform the `W` optimization step.
                 self.optimize(
                     loss_fn=self.loss_fn_w,
                     max_iter=max_iter_inner, tol=tol_inner,
@@ -222,18 +261,21 @@ class MowgliModel():
                 for mod in self.mod:
                     htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])
                 coef = np.log(self.latent_dim)/(self.n_mod*self.rho_w)
+
                 if self.normalize_W == 'cols':
                     self.W = F.softmin(coef*htgw.detach(), dim=0)
                 else:
                     self.W = torch.exp(-coef*htgw.detach())
+                    self.W = utils.normalize_tensor(self.W, self.normalize_W)
+
+                # Clean up.
                 del htgw
 
                 # Update the progress bar.
                 pbar.update(1)
 
-                # Save the total dual loss.
+                # Save the total dual loss and statistics.
                 self.losses.append(self.total_dual_loss().cpu().detach())
-
                 if self.lbda:
                     scores = utils.unbalanced_scores(
                         self.A, self.K, self.G,
@@ -245,12 +287,7 @@ class MowgliModel():
                         self.A, self.G, self.K, self.eps, self.lbda)
                     self.scores_history.append(scores)
 
-                ############################## H step #########################
-
-                # Optimize the dual variable `G`.
-                # for mod in self.G:
-                #     nn.init.zeros_(self.G[mod])
-                
+                # Perform the `H` optimization step.
                 self.optimize(
                     loss_fn=self.loss_fn_h, device=device,
                     max_iter=max_iter_inner, tol=tol_inner,
@@ -268,14 +305,14 @@ class MowgliModel():
                         self.H[mod] = self.mod_weight[mod]*self.G[mod].detach()
                         self.H[mod] = self.H[mod]@self.W.T
                         self.H[mod] = torch.exp(-coef*self.H[mod])
+                        self.H[mod] = utils.normalize_tensor(
+                            self.H[mod], self.normalize_H)
 
                 # Update the progress bar.
                 pbar.update(1)
 
-                # Save the total dual loss.
+                # Save the total dual loss and statistics.
                 self.losses.append(self.total_dual_loss().cpu().detach())
-
-                # TODO refactor this
                 if self.lbda:
                     scores = utils.unbalanced_scores(
                         self.A, self.K, self.G,
@@ -300,24 +337,26 @@ class MowgliModel():
             mdata[mod].uns['H_OT'] = self.H[mod].cpu().numpy()
         mdata.obsm['W_OT'] = self.W.T.cpu().numpy()
 
+
     def build_optimizer(
-        self, params,
-        lr: float, optim_name: str
+        self, params, lr: float, optim_name: str
         ) -> torch.optim.Optimizer:
-        """Generates the optimizer
+        """Generates the optimizer. The PyTorch LBGS implementation is
+        parametrized following the discussion in https://discuss.pytorch.org/
+        t/unclear-purpose-of-max-iter-kwarg-in-the-lbfgs-optimizer/65695.
 
         Args:
-            params (Iterable of Tensors): The parameters to be optimized
-            lr (float): Learning rate of the optimizer
+            params (Iterable of Tensors):
+                The parameters to be optimized.
+            lr (float):
+                Learning rate of the optimizer.
             optim_name (str):
                 Name of the optimizer, among `'lbfgs'`, `'sgd'`, `'adam'`
 
         Returns:
-            torch.optim.Optimizer: The optimizer
+            torch.optim.Optimizer: The optimizer.
         """
         if optim_name == 'lbfgs':
-            # https://discuss.pytorch.org/t/unclear-purpose-of-max-iter
-            # -kwarg-in-the-lbfgs-optimizer/65695
             return optim.LBFGS(
                 params, lr=lr,
                 history_size=5,
@@ -331,23 +370,24 @@ class MowgliModel():
     def optimize(
         self, loss_fn: Callable,
         max_iter: int, history: List,
-        tol: float, pbar: None, device: str) -> None:
-        """Optimize the dual variable based on the provided loss function
+        tol: float, pbar, device: str) -> None:
+        """Optimize a fiven function.
 
         Args:
-            optimizer (torch.optim.Optimizer): Optimizer used
-            loss_fn (Callable): Loss function to optimize
-            max_iter (int): Max number of iterations
-            history (List): List to update with the values of the loss
-            tol (float): Tolerance for the convergence
-            pbar (None): `tqdm` progress bar
-        """
+            loss_fn (Callable): The function to optimize.
+            max_iter (int): The maximum number of iterations.
+            history (List): A list to append the losses to.
+            tol (float): The tolerance before early stopping.
+            pbar (A tqdm progress bar): The progress bar.
+            device (str): The device to work on.
+        """        
 
+        # Build the optimizer.
         optimizer = self.build_optimizer(
             [self.G[mod] for mod in self.G],
             lr=self.lr, optim_name=self.optim_name)
 
-        # This value will be displayed in the progress bar
+        # This value will be initially be displayed in the progress bar
         if len(self.losses) > 0:
             total_loss = self.losses[-1].cpu().numpy()
         else:
@@ -368,10 +408,12 @@ class MowgliModel():
 
             # Every x steps, update the progress bar.
             if i % 10 == 0:
+
                 # Add a value to the loss history.
                 history.append(loss_fn().cpu().detach())
                 gpu_mem_alloc = torch.cuda.memory_allocated(device=device)
 
+                # Populate the progress bar.
                 pbar.set_postfix({
                     'loss': total_loss,
                     'mass_transported': self.scores_history[-1],
@@ -380,13 +422,15 @@ class MowgliModel():
                     'gpu_memory_allocated': gpu_mem_alloc
                 })
 
-                # Attempt early stopping
+                # Attempt early stopping.
                 if utils.early_stop(history, tol):
                     break
 
+
     @torch.no_grad()
     def total_dual_loss(self) -> torch.Tensor:
-        """Compute total dual loss
+        """Compute the total dual loss. This is only used by the user and for,
+        early stopping, not by the optimization algorithm.
 
         Returns:
             torch.Tensor: The loss
@@ -424,11 +468,12 @@ class MowgliModel():
         # Return the full loss.
         return loss
 
+
     def loss_fn_h(self) -> torch.Tensor:
-        """The loss for the optimization of :math:`H`
+        """Computes the loss for the update of `H`.
 
         Returns:
-            torch.Tensor: The loss
+            torch.Tensor: The loss.
         """
         loss_h = 0
         for mod in self.mod:
@@ -444,7 +489,13 @@ class MowgliModel():
             gwt = self.mod_weight[mod]*self.G[mod]@self.W.T
             gwt /= self.n_obs*coef
             loss_h -= coef*utils.entropy_dual_loss(-gwt, self.normalize_H)
+
+            # Clean up.
+            del gwt
+
+        # Return the loss.
         return loss_h
+
 
     def loss_fn_w(self) -> torch.Tensor:
         """Return the loss for the optimization of W
@@ -470,7 +521,8 @@ class MowgliModel():
         coef /= self.n_obs*np.log(self.latent_dim)
         htgw /= coef*self.n_obs
         loss_w -= coef*utils.entropy_dual_loss(-htgw, self.normalize_W)
-
+        
+        # Clean up.
         del htgw
 
         # Return the loss.
