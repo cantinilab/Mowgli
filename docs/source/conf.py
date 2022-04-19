@@ -12,12 +12,12 @@
 #
 import os
 import sys
-sys.path.insert(0, os.path.abspath('../../scmiot'))
+sys.path.insert(0, os.path.abspath('../../mowgli'))
 
 
 # -- Project information -----------------------------------------------------
 
-project = 'scmiot'
+project = 'mowgli'
 copyright = '2021, Geert-Jan Huizing, Gabriel Peyré, Laura Cantini'
 author = 'Geert-Jan Huizing, Gabriel Peyré, Laura Cantini'
 

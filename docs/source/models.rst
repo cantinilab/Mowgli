@@ -1,7 +1,7 @@
-scmiot.models
+mowgli.models
 --------------------
 
-.. automodule:: scmiot.models
+.. automodule:: mowgli.models
    :members:
    :undoc-members:
    :show-inheritance:

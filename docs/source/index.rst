@@ -1,5 +1,5 @@
-Integrative Wasserstein NMF
-===========================
+Mowgli: Multi Omics Wasserstein inteGrative anaLysIs
+====================================================
 
 .. toctree::
    :hidden:
@@ -17,10 +17,11 @@ Integrative Wasserstein NMF
    models
    pl
    tl
+   utils
 
 Installation
 ------------
 
 .. code-block:: none
 
-   pip install scmiot
+   pip install mowgli

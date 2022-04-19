@@ -1,7 +1,7 @@
-scmiot.pl
+mowgli.pl
 ----------------
 
-.. automodule:: scmiot.pl
+.. automodule:: mowgli.pl
    :members:
    :undoc-members:
    :show-inheritance:
