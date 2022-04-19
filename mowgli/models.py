@@ -23,7 +23,7 @@ import muon as mu
 # Progress bar
 from tqdm import tqdm
 
-class OTintNMF():
+class MowgliModel():
     
     def __init__(
         self, latent_dim: int = 15, rho_h: float = 5e-2, rho_w: float = 5e-2,
