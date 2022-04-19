@@ -7,7 +7,7 @@
 
 **Import package**
 
-    from mowgli import *
+    from mowgli import models, tl, pl, utils
 
 **Datasets**: since the data is too big to be hosted on github, please download and unzip the file `datasets.zip` available at https://hub.bio.ens.psl.eu/index.php/s/wyKyyTPTXAww4nQ/download
 
