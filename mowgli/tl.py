@@ -26,6 +26,8 @@ from scipy.spatial.distance import cdist
 # Networks.
 from sknetwork.topology import get_connected_components
 
+from mowgli import score
+
 ################################## EMBEDDING ##################################
 
 
@@ -441,7 +443,7 @@ def enrich(
         idx_sorted = mdata[mod].uns[uns][:, dim].argsort()[::-1]
 
         if n_genes == "auto":
-            nn = np.sum(np.cumsum(np.sort(mdata[mod].uns[uns][:, dim])) > 0.05)
+            nn = np.sum(np.cumsum(np.sort(mdata[mod].uns[uns][:, dim])) > 0.1)
         else:
             nn = n_genes
 
@@ -453,16 +455,28 @@ def enrich(
         ordered_genes["dimension " + str(dim)] = gene_list
 
     # Make the queries to gProfiler, specifying if genes are ordered.
-    enr = sc.queries.enrich(
-        ordered_genes,
-        gprofiler_kwargs={
-            "ordered": ordered,
-            "sources": sources,
-            "domain_scope": domain_scope,
-            # 'background': background,
-            "no_evidences": True,
-        },
-    )
+    if 'custom' in domain_scope:
+        enr = sc.queries.enrich(
+            ordered_genes,
+            gprofiler_kwargs={
+                "ordered": ordered,
+                "sources": sources,
+                "domain_scope": domain_scope,
+                'background': background,
+                "no_evidences": True,
+            },
+        )
+    else:
+        enr = sc.queries.enrich(
+            ordered_genes,
+            gprofiler_kwargs={
+                "ordered": ordered,
+                "sources": sources,
+                "domain_scope": domain_scope,
+                "no_evidences": True,
+            },
+        )
+
 
     # Compute the average of the best p_values for each dimension.
     mean_best_p = enr.groupby("query")["p_value"].min().mean()

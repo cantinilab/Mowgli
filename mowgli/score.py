@@ -1,6 +1,8 @@
 import numpy as np
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import silhouette_score
+from scipy.sparse import csr_matrix
+from sknetwork.topology import get_connected_components
 
 ############################ BASED ON AN EMBEDDING ############################
 
@@ -102,20 +104,73 @@ def knn_prediction_score(
     # Initialize the prediction scores.
     scores = []
 
+    # Initialize the prediction
+    X_predicted = np.zeros_like(X)
+
     # Iterate over the observations.
     for i, neighbors in enumerate(knn):
 
         # Predict cell i from its neighbors.
-        x_predicted = np.mean(X[neighbors], axis=0)
+        X_predicted[i] = np.mean(X[neighbors], axis=0)
 
-        # Check that the prediction has the right shape.
-        assert x_predicted.shape[0] == X.shape[1]
+    # Iterate over the variables.
+    for j in range(X.shape[1]):
 
         # Add the correlation score.
-        scores.append(corr(x_predicted, X[i]))
+        scores.append(corr(X_predicted[:, j], X[:, j])[0])
 
     # Return the average prediction score
     return np.mean(scores)
 
 
-############################ BASED ON A CLUSTERING ############################
+def knn_connectivity_score(knn: np.ndarray, labels: np.ndarray) -> float:
+    """Compute the graph connectivity score, as defined in Open Problems.
+    This measures if within a label, observations are tightly linked.
+    More precisely, the proportion of observations contained in the
+    largest connected component.
+
+    Args:
+        knn (np.ndarray): 
+            The knn (n_obs, k). The i-th row contains the indices
+            to the k nearest neighbors.
+        labels (np.ndarray):
+            The labels, shaped (n_obs)
+
+    Returns:
+        float: The connectivty score.
+    """    
+
+    # Initialize the adjacency matrix.
+    adjacency = csr_matrix((knn.shape[0], knn.shape[0]))
+
+    # Fill the adjacency matrix.
+    for i, neighbors in enumerate(knn):
+        adjacency[i, neighbors] = 1
+
+    # Initialize the proportions
+    props = []
+
+    # Iterate over unique labels.
+    for label in np.unique(labels):
+
+        # Define the indices of cells concerned.
+        idx = np.where(labels == label)[0]
+
+        try:
+            # Find the connected components in the category's subgraph.
+            conn_comp = get_connected_components(
+                adjacency[idx][:, idx], connection="strong"
+            )
+
+            # Count the occurences of the components.
+            _, counts = np.unique(conn_comp, return_counts=True)
+
+            # The proportion is the largest component
+            # over the number of cells in the cluster.
+            props.append(counts.max() / idx.shape[0])
+        except:
+            props.append(0)
+            print("Warning: empty component")
+
+    # Return average of the proportions.
+    return np.mean(props)
