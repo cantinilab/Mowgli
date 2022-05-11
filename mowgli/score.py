@@ -3,6 +3,7 @@ from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import silhouette_score
 from scipy.sparse import csr_matrix
 from sknetwork.topology import get_connected_components
+from scipy.spatial.distance import cdist
 
 ############################ BASED ON AN EMBEDDING ############################
 
@@ -130,7 +131,7 @@ def knn_connectivity_score(knn: np.ndarray, labels: np.ndarray) -> float:
     largest connected component.
 
     Args:
-        knn (np.ndarray): 
+        knn (np.ndarray):
             The knn (n_obs, k). The i-th row contains the indices
             to the k nearest neighbors.
         labels (np.ndarray):
@@ -138,7 +139,7 @@ def knn_connectivity_score(knn: np.ndarray, labels: np.ndarray) -> float:
 
     Returns:
         float: The connectivty score.
-    """    
+    """
 
     # Initialize the adjacency matrix.
     adjacency = csr_matrix((knn.shape[0], knn.shape[0]))
@@ -174,3 +175,35 @@ def knn_connectivity_score(knn: np.ndarray, labels: np.ndarray) -> float:
 
     # Return average of the proportions.
     return np.mean(props)
+
+
+#################################### EMBEDDING TO KNN ####################################
+
+
+def embedding_to_knn(
+    embedding: np.ndarray, k: int = 15, metric: str = "euclidean"
+) -> np.ndarray:
+    """Convert embedding to knn
+
+    Args:
+        embedding (np.ndarray): The embedding (n_obs, n_latent)
+        k (int, optional): The number of nearest neighbors. Defaults to 15.
+        metric (str, optional): The metric to compute neighbors with. Defaults to "euclidean".
+
+    Returns:
+        np.ndarray: The knn (n_obs, k)
+    """
+    # Initialize the knn graph.
+    knn = np.zeros((embedding.shape[0], k), dtype=int)
+
+    # Compute pariwise distances between observations.
+    distances = cdist(embedding, embedding, metric=metric)
+
+    # Iterate over observations.
+    for i in range(distances.shape[0]):
+
+        # Get the `max_neighbors` nearest neighbors.
+        knn[i] = distances[i].argsort()[1 : k + 1]
+    
+    # Return the knn graph.
+    return knn
