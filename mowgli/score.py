@@ -1,9 +1,15 @@
+from typing import Iterable
 import numpy as np
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import silhouette_score
 from scipy.sparse import csr_matrix
 from sknetwork.topology import get_connected_components
 from scipy.spatial.distance import cdist
+from sklearn.metrics import adjusted_rand_score as ARI
+from sklearn.metrics import normalized_mutual_info_score as NMI
+import anndata as ad
+import scanpy as sc
+from tqdm import tqdm
 
 ############################ BASED ON AN EMBEDDING ############################
 
@@ -31,6 +37,35 @@ def embedding_silhouette_score(
 
     # Compute and return the silhouette score.
     return silhouette_score(embedding, labels, metric=metric)
+
+
+def embedding_leiden_across_resolutions(
+    embedding: np.ndarray,
+    labels: np.ndarray,
+    n_neighbors: int,
+    resolutions: Iterable[float] = np.arange(0.1, 2.1, 0.1),
+):
+    # Create an AnnData object with the joint embedding.
+    joint_embedding = ad.AnnData(embedding)
+
+    # Initialize the results.
+    aris, nmis = [], []
+
+    # Compute neighbors on the joint embedding.
+    sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors)
+
+    # For all resolutions,
+    for resolution in tqdm(resolutions):
+
+        # Perform Leiden clustering.
+        sc.tl.leiden(joint_embedding, resolution=resolution)
+
+        # Compute ARI and NMI
+        aris.append(ARI(joint_embedding.obs["leiden"], labels))
+        nmis.append(NMI(joint_embedding.obs["leiden"], labels))
+
+    # Return ARI and NMI for various resolutions.
+    return resolutions, aris, nmis
 
 
 ################################ BASED ON A KNN ###############################
@@ -204,6 +239,6 @@ def embedding_to_knn(
 
         # Get the `max_neighbors` nearest neighbors.
         knn[i] = distances[i].argsort()[1 : k + 1]
-    
+
     # Return the knn graph.
     return knn
