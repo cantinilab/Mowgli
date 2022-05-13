@@ -136,10 +136,7 @@ class MowgliModel:
             # Normalize the reference dataset, and add a small value
             # for numerical stability.
             self.A[mod] += 1e-6
-            if self.normalize_A == "cols":
-                self.A[mod] /= self.A[mod].sum(0)
-            else:
-                self.A[mod] /= self.A[mod].sum(0).mean()
+            self.A[mod] /= self.A[mod].sum(0)
 
             # Determine which cost function to use.
             cost = self.cost if isinstance(self.cost, str) else self.cost[mod]
@@ -163,14 +160,14 @@ class MowgliModel:
             self.H[mod] = torch.rand(
                 self.n_var[mod], self.latent_dim, device=device, dtype=dtype
             )
-            self.H[mod] = utils.normalize_tensor(self.H[mod], self.normalize_H)
+            self.H[mod] = utils.normalize_tensor(self.H[mod])
 
             # Initialize the dual variable `G`
             self.G[mod] = torch.zeros_like(self.A[mod], requires_grad=True)
 
         # Initialize the shared factor `W`, which should be normalized.
         self.W = torch.rand(self.latent_dim, self.n_obs, device=device, dtype=dtype)
-        self.W = utils.normalize_tensor(self.W, self.normalize_W)
+        self.W = utils.normalize_tensor(self.W)
 
         # Clean up.
         del keep_idx, features
@@ -251,11 +248,7 @@ class MowgliModel:
                     htgw += self.H[mod].T @ (self.mod_weight[mod] * self.G[mod])
                 coef = np.log(self.latent_dim) / (self.n_mod * self.rho_w)
 
-                if self.normalize_W == "cols":
-                    self.W = F.softmin(coef * htgw.detach(), dim=0)
-                else:
-                    self.W = torch.exp(-coef * htgw.detach())
-                    self.W = utils.normalize_tensor(self.W, self.normalize_W)
+                self.W = F.softmin(coef * htgw.detach(), dim=0)
 
                 # Clean up.
                 del htgw
@@ -282,17 +275,10 @@ class MowgliModel:
                 for mod in self.mod:
                     coef = self.latent_dim * np.log(self.n_var[mod])
                     coef /= self.n_obs * self.rho_h[mod]
-                    if self.normalize_H == "cols":
-                        self.H[mod] = self.mod_weight[mod] * self.G[mod].detach()
-                        self.H[mod] = self.H[mod] @ self.W.T
-                        self.H[mod] = F.softmin(coef * self.H[mod], dim=0)
-                    else:
-                        self.H[mod] = self.mod_weight[mod] * self.G[mod].detach()
-                        self.H[mod] = self.H[mod] @ self.W.T
-                        self.H[mod] = torch.exp(-coef * self.H[mod])
-                        self.H[mod] = utils.normalize_tensor(
-                            self.H[mod], self.normalize_H
-                        )
+
+                    self.H[mod] = self.mod_weight[mod] * self.G[mod].detach()
+                    self.H[mod] = self.H[mod] @ self.W.T
+                    self.H[mod] = F.softmin(coef * self.H[mod], dim=0)
 
                 # Update the progress bar.
                 pbar.update(1)
@@ -479,7 +465,7 @@ class MowgliModel:
             coef = self.rho_h[mod] / (self.latent_dim * np.log(self.n_var[mod]))
             gwt = self.mod_weight[mod] * self.G[mod] @ self.W.T
             gwt /= self.n_obs * coef
-            loss_h -= coef * utils.entropy_dual_loss(-gwt, self.normalize_H)
+            loss_h -= coef * utils.entropy_dual_loss(-gwt)
 
             # Clean up.
             del gwt
@@ -516,7 +502,7 @@ class MowgliModel:
         coef = self.n_mod * self.rho_w
         coef /= self.n_obs * np.log(self.latent_dim)
         htgw /= coef * self.n_obs
-        loss_w -= coef * utils.entropy_dual_loss(-htgw, self.normalize_W)
+        loss_w -= coef * utils.entropy_dual_loss(-htgw)
 
         # Clean up.
         del htgw

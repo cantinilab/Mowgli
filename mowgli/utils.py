@@ -87,24 +87,16 @@ def compute_ground_cost(
     return K
 
 
-def normalize_tensor(X: torch.Tensor, normalize: str) -> torch.Tensor:
-    """Normalize a tensor along columns, rows or nothing.
+def normalize_tensor(X: torch.Tensor) -> torch.Tensor:
+    """Normalize a tensor along columns
 
     Args:
         X (torch.Tensor): The tensor to normalize.
-        normalize (str): The direction to normalize on.
 
     Returns:
         torch.Tensor: The normalized tensor.
     """
-    if normalize == "cols":
-        return X / X.sum(0)
-    elif normalize == "rows":
-        return (X.T / X.sum(1)).T
-    elif normalize == "full":
-        return X / X.sum()
-    else:
-        return X / X.sum(0).mean()
+    return X / X.sum(0)
 
 
 def entropy(
@@ -128,25 +120,16 @@ def entropy(
     return -torch.sum(X * (torch.nan_to_num(X.log()) - offset)) / scale
 
 
-def entropy_dual_loss(Y: torch.Tensor, normalize: str) -> torch.Tensor:
-    """Compute the Legendre dual of the entropy. This depends on the
-    normalization constraint.
+def entropy_dual_loss(Y: torch.Tensor) -> torch.Tensor:
+    """Compute the Legendre dual of the entropy.
 
     Args:
         Y (torch.Tensor): The input parameter.
-        normalize (str): The normalization constraint for the input parameter.
 
     Returns:
         torch.Tensor: The loss.
     """
-    if normalize == "cols":
-        return -torch.logsumexp(Y, dim=0).sum()
-    elif normalize == "rows":
-        return -torch.logsumexp(Y, dim=1).sum()
-    elif normalize == "full":
-        return -torch.logsumexp(Y, dim=(0, 1)).sum()
-    else:
-        return -torch.exp(Y).sum()
+    return -torch.logsumexp(Y, dim=0).sum()
 
 
 def mass_transported(
