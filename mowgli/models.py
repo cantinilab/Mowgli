@@ -112,6 +112,9 @@ class MowgliModel:
         self.n_obs = mdata.n_obs
         self.n_var = {}
 
+        if not isinstance(self.rho_h, dict):
+            self.rho_h = {mod: self.rho_h for mod in self.mod}
+
         # For each modality,
         for mod in self.mod:
 
@@ -218,9 +221,6 @@ class MowgliModel:
 
         self.lr = lr
         self.optim_name = optim_name
-
-        if not isinstance(self.rho_h, dict):
-            self.rho_h = {mod: self.rho_h for mod in mdata}
 
         # Initialize the loss histories.
         self.losses_w, self.losses_h, self.losses = [], [], []
