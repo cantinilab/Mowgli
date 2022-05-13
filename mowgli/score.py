@@ -109,6 +109,7 @@ def knn_prediction_score(
     X: np.ndarray,
     knn: np.ndarray,
     correlation_fn: str = "pearson",
+    along: str = "var",
 ) -> float:
     """Compute the prediction score given the input data and a kNN, averaged
     over observations. For one observation, this is the correlation between
@@ -124,12 +125,15 @@ def knn_prediction_score(
         correlation_fn (str, optional):
             The function to use for correlation, either 'pearson'
             or 'spearman'. Defaults to "pearson".
+        along (str, optional):
+            Compute along either 'obs' or 'var'. Defaults to "var".
 
     Returns:
         float: The averaged knn prediction score.
     """
     # Check that the correlation function is correct.
     assert correlation_fn == "pearson" or correlation_fn == "spearman"
+    assert along == "obs" or along == "var"
 
     # Define the correlation function.
     corr = pearsonr if correlation_fn == "pearson" else spearmanr
@@ -149,14 +153,23 @@ def knn_prediction_score(
         # Predict cell i from its neighbors.
         X_predicted[i] = np.mean(X[neighbors], axis=0)
 
-    # Iterate over the variables.
-    for j in range(X.shape[1]):
+    if along == 'var':
 
-        # Add the correlation score.
-        scores.append(corr(X_predicted[:, j], X[:, j])[0])
+        # Iterate over the variables.
+        for j in range(X.shape[1]):
 
-    # Return the average prediction score
-    return np.mean(scores)
+            # Add the correlation score.
+            scores.append(corr(X_predicted[:, j], X[:, j])[0])
+    else:
+        
+        # Iterate over the obs.
+        for i in range(X.shape[0]):
+
+            # Add the correlation score.
+            scores.append(corr(X_predicted[i], X[i])[0])
+
+    # Return the prediction scores
+    return scores
 
 
 def knn_connectivity_score(knn: np.ndarray, labels: np.ndarray) -> float:

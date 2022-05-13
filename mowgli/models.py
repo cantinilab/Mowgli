@@ -11,19 +11,23 @@ from tqdm import tqdm
 
 from mowgli import utils
 
-class MowgliModel():
-    
+
+class MowgliModel:
     def __init__(
         self,
         latent_dim: int = 15,
         use_mod_weight: bool = False,
-        rho_h: float = 5e-2, rho_w: float = 5e-2,
-        eps: float = 5e-2, lbda: float = None,
-        cost: str = 'cosine', pca_cost: bool = False,
+        rho_h: float = 5e-2,
+        rho_w: float = 5e-2,
+        eps: float = 5e-2,
+        lbda: float = None,
+        cost: str = "cosine",
+        pca_cost: bool = False,
         cost_path: dict = None,
-        normalize_A: str = 'cols',
-        normalize_H: str = 'cols',
-        normalize_W: str = 'cols'):
+        normalize_A: str = "cols",
+        normalize_H: str = "cols",
+        normalize_W: str = "cols",
+    ):
         """Initialize the Mowgli model, which performs integrative NMF with an
         Optimal Transport loss.
 
@@ -69,19 +73,19 @@ class MowgliModel():
                 Whether to normalize the embeddings. If False, `lbda` must
                 be set and greater than 0. This is less stable so not advised.
                 Defaults to 'cols'.
-        """        
+        """
 
         # Check that the user-defined parameters are valid.
-        assert(latent_dim > 0)
-        assert(rho_h > 0)
-        assert(rho_w > 0)
-        assert(eps > 0)
+        assert latent_dim > 0
+        assert rho_h > 0
+        assert rho_w > 0
+        assert eps > 0
         if lbda != None:
-            assert(lbda > 0)
+            assert lbda > 0
         else:
-            assert(normalize_A == 'cols')
-            assert(normalize_H == 'cols')
-            assert(normalize_W == 'cols')
+            assert normalize_A == "cols"
+            assert normalize_H == "cols"
+            assert normalize_W == "cols"
 
         # Save arguments as attributes.
         self.latent_dim = latent_dim
@@ -102,18 +106,18 @@ class MowgliModel():
 
         # Initialize the loss and statistics histories.
         self.losses_w, self.losses_h, self.losses = [], [], []
-        self.scores_history = [0] # TODO: change this
+        self.scores_history = [0]  # TODO: change this
 
         # Initialize the dictionaries containing matrices for each omics.
         self.A, self.H, self.G, self.K = {}, {}, {}, {}
 
-
     def init_parameters(
         self,
         mdata: mu.MuData,
-        dtype: torch.dtype, device: torch.device,
-        force_recompute: bool = False
-        ) -> None:
+        dtype: torch.dtype,
+        device: torch.device,
+        force_recompute: bool = False,
+    ) -> None:
         """Initialize parameters based on input data.
 
         Args:
@@ -125,7 +129,7 @@ class MowgliModel():
                 The device to work on.
             force_recompute (bool, optional):
                 Whether to recompute the ground cost. Defaults to False.
-        """        
+        """
 
         # Set some attributes.
         self.mod = mdata.mod
@@ -135,29 +139,29 @@ class MowgliModel():
 
         # For each modality,
         for mod in self.mod:
-            
+
             # Define the modality weights.
             if self.use_mod_weight:
-                mod_weight = mdata.obs[mod + ':mod_weight'].to_numpy()
+                mod_weight = mdata.obs[mod + ":mod_weight"].to_numpy()
                 mod_weight = torch.Tensor(mod_weight).reshape(1, -1)
                 mod_weight = mod_weight.to(dtype=dtype, device=device)
                 self.mod_weight[mod] = mod_weight
             else:
                 self.mod_weight[mod] = torch.ones(
-                    1, self.n_obs, dtype=dtype, device=device)
+                    1, self.n_obs, dtype=dtype, device=device
+                )
 
             # Select the highly variable features.
-            keep_idx = mdata[mod].var['highly_variable'].to_numpy()
+            keep_idx = mdata[mod].var["highly_variable"].to_numpy()
 
             # Make the reference dataset.
-            self.A[mod] = utils.reference_dataset(
-                mdata[mod].X, dtype, device, keep_idx)
+            self.A[mod] = utils.reference_dataset(mdata[mod].X, dtype, device, keep_idx)
             self.n_var[mod] = self.A[mod].shape[0]
-            
+
             # Normalize the reference dataset, and add a small value
             # for numerical stability.
             self.A[mod] += 1e-6
-            if self.normalize_A == 'cols':
+            if self.normalize_A == "cols":
                 self.A[mod] /= self.A[mod].sum(0)
             else:
                 self.A[mod] /= self.A[mod].sum(0).mean()
@@ -177,40 +181,44 @@ class MowgliModel():
 
             # Compute ground cost, using the specified cost function.
             self.K[mod] = utils.compute_ground_cost(
-                features, cost, self.eps, force_recompute,
-                cost_path, dtype, device)
+                features, cost, self.eps, force_recompute, cost_path, dtype, device
+            )
 
             # Initialize the matrices `H`, which should be normalized.
             self.H[mod] = torch.rand(
-                self.n_var[mod], self.latent_dim, device=device, dtype=dtype)
+                self.n_var[mod], self.latent_dim, device=device, dtype=dtype
+            )
             self.H[mod] = utils.normalize_tensor(self.H[mod], self.normalize_H)
 
             # Initialize the dual variable `G`
             self.G[mod] = torch.zeros_like(self.A[mod], requires_grad=True)
 
         # Initialize the shared factor `W`, which should be normalized.
-        self.W = torch.rand(
-            self.latent_dim, self.n_obs, device=device, dtype=dtype)
+        self.W = torch.rand(self.latent_dim, self.n_obs, device=device, dtype=dtype)
         self.W = utils.normalize_tensor(self.W, self.normalize_W)
-        
+
         # Clean up.
         del keep_idx, features
 
-
     def train(
-        self, mdata: mu.MuData,
-        max_iter_inner: int = 1_000, max_iter: int = 100,
-        device: torch.device = 'cpu', dtype: torch.dtype = torch.float,
-        lr: float = 1, optim_name: str = "lbfgs",
-        tol_inner: float = 1e-9, tol_outer: float = 1e-3
-        ) -> None:
+        self,
+        mdata: mu.MuData,
+        max_iter_inner: int = 1_000,
+        max_iter: int = 100,
+        device: torch.device = "cpu",
+        dtype: torch.dtype = torch.float,
+        lr: float = 1,
+        optim_name: str = "lbfgs",
+        tol_inner: float = 1e-9,
+        tol_outer: float = 1e-3,
+    ) -> None:
         """Train the Mowgli model on an input MuData object.
 
         Args:
             mdata (mu.MuData):
                 The input MuData object.?
             max_iter_inner (int, optional):
-                How many iterations for the inner optimization loop 
+                How many iterations for the inner optimization loop
                 (optimizing H, or W). Defaults to 1_000.
             max_iter (int, optional):
                 How many interations for the outer optimization loop (how
@@ -231,11 +239,11 @@ class MowgliModel():
             tol_outer (float, optional):
                 The tolerance for the outer iterations before early stopping.
                 Defaults to 1e-3.
-        """        
+        """
 
         # First, initialize the different parameters.
         self.init_parameters(mdata, dtype=dtype, device=device)
-        
+
         self.lr = lr
         self.optim_name = optim_name
 
@@ -243,7 +251,7 @@ class MowgliModel():
         self.losses_w, self.losses_h, self.losses = [], [], []
 
         # Set up the progress bar.
-        pbar = tqdm(total=2*max_iter, position=0, leave=True)
+        pbar = tqdm(total=2 * max_iter, position=0, leave=True)
 
         # This is the main loop, with at most `max_iter` iterations.
         try:
@@ -252,20 +260,23 @@ class MowgliModel():
                 # Perform the `W` optimization step.
                 self.optimize(
                     loss_fn=self.loss_fn_w,
-                    max_iter=max_iter_inner, tol=tol_inner,
-                    history=self.losses_h, pbar=pbar,
-                    device=device)
-                
+                    max_iter=max_iter_inner,
+                    tol=tol_inner,
+                    history=self.losses_h,
+                    pbar=pbar,
+                    device=device,
+                )
+
                 # Update the shared factor `W`.
                 htgw = 0
                 for mod in self.mod:
-                    htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])
-                coef = np.log(self.latent_dim)/(self.n_mod*self.rho_w)
+                    htgw += self.H[mod].T @ (self.mod_weight[mod] * self.G[mod])
+                coef = np.log(self.latent_dim) / (self.n_mod * self.rho_w)
 
-                if self.normalize_W == 'cols':
-                    self.W = F.softmin(coef*htgw.detach(), dim=0)
+                if self.normalize_W == "cols":
+                    self.W = F.softmin(coef * htgw.detach(), dim=0)
                 else:
-                    self.W = torch.exp(-coef*htgw.detach())
+                    self.W = torch.exp(-coef * htgw.detach())
                     self.W = utils.normalize_tensor(self.W, self.normalize_W)
 
                 # Clean up.
@@ -278,35 +289,40 @@ class MowgliModel():
                 self.losses.append(self.total_dual_loss().cpu().detach())
                 if self.lbda:
                     scores = utils.unbalanced_scores(
-                        self.A, self.K, self.G,
-                        self.H, self.W,
-                        self.eps, self.lbda)
+                        self.A, self.K, self.G, self.H, self.W, self.eps, self.lbda
+                    )
                     self.scores_history.append(scores)
                 else:
                     scores = utils.mass_transported(
-                        self.A, self.G, self.K, self.eps, self.lbda)
+                        self.A, self.G, self.K, self.eps, self.lbda
+                    )
                     self.scores_history.append(scores)
 
                 # Perform the `H` optimization step.
                 self.optimize(
-                    loss_fn=self.loss_fn_h, device=device,
-                    max_iter=max_iter_inner, tol=tol_inner,
-                    history=self.losses_h, pbar=pbar)
+                    loss_fn=self.loss_fn_h,
+                    device=device,
+                    max_iter=max_iter_inner,
+                    tol=tol_inner,
+                    history=self.losses_h,
+                    pbar=pbar,
+                )
 
                 # Update the omic specific factors `H[mod]`.
                 for mod in self.mod:
-                    coef = self.latent_dim*np.log(self.n_var[mod])
-                    coef /= self.n_obs*self.rho_h
-                    if self.normalize_H == 'cols':
-                        self.H[mod] = self.mod_weight[mod]*self.G[mod].detach()
-                        self.H[mod] = self.H[mod]@self.W.T
-                        self.H[mod] = F.softmin(coef*self.H[mod], dim=0)
+                    coef = self.latent_dim * np.log(self.n_var[mod])
+                    coef /= self.n_obs * self.rho_h
+                    if self.normalize_H == "cols":
+                        self.H[mod] = self.mod_weight[mod] * self.G[mod].detach()
+                        self.H[mod] = self.H[mod] @ self.W.T
+                        self.H[mod] = F.softmin(coef * self.H[mod], dim=0)
                     else:
-                        self.H[mod] = self.mod_weight[mod]*self.G[mod].detach()
-                        self.H[mod] = self.H[mod]@self.W.T
-                        self.H[mod] = torch.exp(-coef*self.H[mod])
+                        self.H[mod] = self.mod_weight[mod] * self.G[mod].detach()
+                        self.H[mod] = self.H[mod] @ self.W.T
+                        self.H[mod] = torch.exp(-coef * self.H[mod])
                         self.H[mod] = utils.normalize_tensor(
-                            self.H[mod], self.normalize_H)
+                            self.H[mod], self.normalize_H
+                        )
 
                 # Update the progress bar.
                 pbar.update(1)
@@ -315,32 +331,30 @@ class MowgliModel():
                 self.losses.append(self.total_dual_loss().cpu().detach())
                 if self.lbda:
                     scores = utils.unbalanced_scores(
-                        self.A, self.K, self.G,
-                        self.H, self.W,
-                        self.eps, self.lbda)
+                        self.A, self.K, self.G, self.H, self.W, self.eps, self.lbda
+                    )
                     self.scores_history.append(scores)
                 else:
                     scores = utils.mass_transported(
-                        self.A, self.G, self.K, self.eps, self.lbda)
+                        self.A, self.G, self.K, self.eps, self.lbda
+                    )
                     self.scores_history.append(scores)
 
                 # Early stopping
-                if utils.early_stop(
-                    self.losses, tol_outer, nonincreasing=True):
+                if utils.early_stop(self.losses, tol_outer, nonincreasing=True):
                     break
 
         except KeyboardInterrupt:
-            print('Training interrupted.')
+            print("Training interrupted.")
 
         # Add H and W to the MuData object.
         for mod in self.mod:
-            mdata[mod].uns['H_OT'] = self.H[mod].cpu().numpy()
-        mdata.obsm['W_OT'] = self.W.T.cpu().numpy()
-
+            mdata[mod].uns["H_OT"] = self.H[mod].cpu().numpy()
+        mdata.obsm["W_OT"] = self.W.T.cpu().numpy()
 
     def build_optimizer(
         self, params, lr: float, optim_name: str
-        ) -> torch.optim.Optimizer:
+    ) -> torch.optim.Optimizer:
         """Generates the optimizer. The PyTorch LBGS implementation is
         parametrized following the discussion in https://discuss.pytorch.org/
         t/unclear-purpose-of-max-iter-kwarg-in-the-lbfgs-optimizer/65695.
@@ -356,21 +370,24 @@ class MowgliModel():
         Returns:
             torch.optim.Optimizer: The optimizer.
         """
-        if optim_name == 'lbfgs':
+        if optim_name == "lbfgs":
             return optim.LBFGS(
-                params, lr=lr,
-                history_size=5,
-                max_iter=1,
-                line_search_fn='strong_wolfe')
-        elif optim_name == 'sgd':
+                params, lr=lr, history_size=5, max_iter=1, line_search_fn="strong_wolfe"
+            )
+        elif optim_name == "sgd":
             return optim.SGD(params, lr=lr)
-        elif optim_name == 'adam':
+        elif optim_name == "adam":
             return optim.Adam(params, lr=lr)
 
     def optimize(
-        self, loss_fn: Callable,
-        max_iter: int, history: List,
-        tol: float, pbar, device: str) -> None:
+        self,
+        loss_fn: Callable,
+        max_iter: int,
+        history: List,
+        tol: float,
+        pbar,
+        device: str,
+    ) -> None:
         """Optimize a fiven function.
 
         Args:
@@ -380,18 +397,18 @@ class MowgliModel():
             tol (float): The tolerance before early stopping.
             pbar (A tqdm progress bar): The progress bar.
             device (str): The device to work on.
-        """        
+        """
 
         # Build the optimizer.
         optimizer = self.build_optimizer(
-            [self.G[mod] for mod in self.G],
-            lr=self.lr, optim_name=self.optim_name)
+            [self.G[mod] for mod in self.G], lr=self.lr, optim_name=self.optim_name
+        )
 
         # This value will be initially be displayed in the progress bar
         if len(self.losses) > 0:
             total_loss = self.losses[-1].cpu().numpy()
         else:
-            total_loss = '?'
+            total_loss = "?"
 
         # This is the main optimization loop.
         for i in range(max_iter):
@@ -414,18 +431,19 @@ class MowgliModel():
                 gpu_mem_alloc = torch.cuda.memory_allocated(device=device)
 
                 # Populate the progress bar.
-                pbar.set_postfix({
-                    'loss': total_loss,
-                    'mass_transported': self.scores_history[-1],
-                    'loss_inner': history[-1].cpu().numpy(),
-                    'inner_steps': i,
-                    'gpu_memory_allocated': gpu_mem_alloc
-                })
+                pbar.set_postfix(
+                    {
+                        "loss": total_loss,
+                        "mass_transported": self.scores_history[-1],
+                        "loss_inner": history[-1].cpu().numpy(),
+                        "inner_steps": i,
+                        "gpu_memory_allocated": gpu_mem_alloc,
+                    }
+                )
 
                 # Attempt early stopping.
                 if utils.early_stop(history, tol):
                     break
-
 
     @torch.no_grad()
     def total_dual_loss(self) -> torch.Tensor:
@@ -446,28 +464,34 @@ class MowgliModel():
         for mod in modalities:
 
             # Add the OT dual loss.
-            loss -= utils.ot_dual_loss(
-                self.A[mod], self.G[mod], self.K[mod],
-                self.eps, self.lbda,
-                self.mod_weight[mod])/self.n_obs
+            loss -= (
+                utils.ot_dual_loss(
+                    self.A[mod],
+                    self.G[mod],
+                    self.K[mod],
+                    self.eps,
+                    self.lbda,
+                    self.mod_weight[mod],
+                )
+                / self.n_obs
+            )
 
             # Add the Lagrange multiplier term.
-            lagrange = self.H[mod]@self.W
-            lagrange *= self.mod_weight[mod]*self.G[mod]
+            lagrange = self.H[mod] @ self.W
+            lagrange *= self.mod_weight[mod] * self.G[mod]
             lagrange = lagrange.sum()
-            loss += lagrange/self.n_obs
+            loss += lagrange / self.n_obs
 
             # Add the `H[mod]` entropy term.
-            coef = self.rho_h/(self.latent_dim*np.log(self.n_var[mod]))
-            loss -= coef*utils.entropy(self.H[mod], min_one=True)
+            coef = self.rho_h / (self.latent_dim * np.log(self.n_var[mod]))
+            loss -= coef * utils.entropy(self.H[mod], min_one=True)
 
         # Add the `W` entropy term.
-        coef = self.n_mod*self.rho_w/(self.n_obs*np.log(self.latent_dim))
-        loss -= coef*utils.entropy(self.W, min_one=True)
+        coef = self.n_mod * self.rho_w / (self.n_obs * np.log(self.latent_dim))
+        loss -= coef * utils.entropy(self.W, min_one=True)
 
         # Return the full loss.
         return loss
-
 
     def loss_fn_h(self) -> torch.Tensor:
         """Computes the loss for the update of `H`.
@@ -479,23 +503,29 @@ class MowgliModel():
         for mod in self.mod:
 
             # OT dual loss term
-            loss_h += utils.ot_dual_loss(
-                self.A[mod], self.G[mod], self.K[mod],
-                self.eps, self.lbda,
-                self.mod_weight[mod])/self.n_obs
-            
+            loss_h += (
+                utils.ot_dual_loss(
+                    self.A[mod],
+                    self.G[mod],
+                    self.K[mod],
+                    self.eps,
+                    self.lbda,
+                    self.mod_weight[mod],
+                )
+                / self.n_obs
+            )
+
             # Entropy dual loss term
-            coef = self.rho_h/(self.latent_dim*np.log(self.n_var[mod]))
-            gwt = self.mod_weight[mod]*self.G[mod]@self.W.T
-            gwt /= self.n_obs*coef
-            loss_h -= coef*utils.entropy_dual_loss(-gwt, self.normalize_H)
+            coef = self.rho_h / (self.latent_dim * np.log(self.n_var[mod]))
+            gwt = self.mod_weight[mod] * self.G[mod] @ self.W.T
+            gwt /= self.n_obs * coef
+            loss_h -= coef * utils.entropy_dual_loss(-gwt, self.normalize_H)
 
             # Clean up.
             del gwt
 
         # Return the loss.
         return loss_h
-
 
     def loss_fn_w(self) -> torch.Tensor:
         """Return the loss for the optimization of W
@@ -508,20 +538,27 @@ class MowgliModel():
         for mod in self.mod:
 
             # For the entropy dual loss term.
-            htgw += self.H[mod].T@(self.mod_weight[mod]*self.G[mod])
+            htgw += self.H[mod].T @ (self.mod_weight[mod] * self.G[mod])
 
             # OT dual loss term.
-            loss_w += utils.ot_dual_loss(
-                self.A[mod], self.G[mod], self.K[mod],
-                self.eps, self.lbda,
-                self.mod_weight[mod])/self.n_obs
-        
+            loss_w += (
+                utils.ot_dual_loss(
+                    self.A[mod],
+                    self.G[mod],
+                    self.K[mod],
+                    self.eps,
+                    self.lbda,
+                    self.mod_weight[mod],
+                )
+                / self.n_obs
+            )
+
         # Entropy dual loss term.
-        coef = self.n_mod*self.rho_w
-        coef /= self.n_obs*np.log(self.latent_dim)
-        htgw /= coef*self.n_obs
-        loss_w -= coef*utils.entropy_dual_loss(-htgw, self.normalize_W)
-        
+        coef = self.n_mod * self.rho_w
+        coef /= self.n_obs * np.log(self.latent_dim)
+        htgw /= coef * self.n_obs
+        loss_w -= coef * utils.entropy_dual_loss(-htgw, self.normalize_W)
+
         # Clean up.
         del htgw
 

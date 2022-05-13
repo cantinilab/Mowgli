@@ -6,27 +6,10 @@ import muon as mu
 import anndata as ad
 
 # Typing imports.
-from typing import Dict, Iterable, List
+from typing import Iterable
 
 # Matrix operations.
 import numpy as np
-
-# Statistics.
-from sklearn.metrics import silhouette_score
-from sklearn.metrics import adjusted_rand_score as ARI
-from sklearn.metrics import normalized_mutual_info_score as NMI
-from scipy.stats import pearsonr, spearmanr
-
-# Pretty progress bars.
-from tqdm import tqdm
-
-# Distance functions.
-from scipy.spatial.distance import cdist
-
-# Networks.
-from sknetwork.topology import get_connected_components
-
-from mowgli import score
 
 ################################## EMBEDDING ##################################
 
