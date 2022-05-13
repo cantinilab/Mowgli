@@ -20,13 +20,9 @@ class MowgliModel:
         rho_h: float = 5e-2,
         rho_w: float = 5e-2,
         eps: float = 5e-2,
-        lbda: float = None,
         cost: str = "cosine",
         pca_cost: bool = False,
         cost_path: dict = None,
-        normalize_A: str = "cols",
-        normalize_H: str = "cols",
-        normalize_W: str = "cols",
     ):
         """Initialize the Mowgli model, which performs integrative NMF with an
         Optimal Transport loss.
@@ -47,10 +43,6 @@ class MowgliModel:
             eps (float, optional):
                 The entropy parameter for epsilon transport. Large values
                 decrease importance of individual genes. Defaults to 5e-2.
-            lbda (float, optional):
-                The unbalanced parameter. If set, it should be greater than
-                0. Allows to work with not-normalized vectors but is less
-                stable. We thus advise not using it. Defaults to None.
             cost (str, optional):
                 The function used to compute an emprical ground cost. All
                 metrics from Scipy's `cdist` are allowed. Defaults to 'cosine'.
@@ -61,42 +53,25 @@ class MowgliModel:
                 Will look for an existing cost as a `.npy` file at this
                 path. If not found, the cost will be computed then saved
                 there. Defaults to None.
-            normalize_A (str, optional):
-                Whether to normalize the dataset. If False, `lbda` must
-                be set and greater than 0. This is less stable so not advised.
-                Defaults to 'cols'.
-            normalize_H (str, optional):
-                Whether to normalize the dictionary. If False, `lbda` must
-                be set and greater than 0. This is less stable so not advised.
-                Defaults to 'cols'.
-            normalize_W (str, optional):
-                Whether to normalize the embeddings. If False, `lbda` must
-                be set and greater than 0. This is less stable so not advised.
-                Defaults to 'cols'.
         """
 
         # Check that the user-defined parameters are valid.
         assert latent_dim > 0
-        assert rho_h > 0
         assert rho_w > 0
         assert eps > 0
-        if lbda != None:
-            assert lbda > 0
+
+        if isinstance(rho_h, dict):
+            for mod in rho_h:
+                assert rho_h[mod] > 0
         else:
-            assert normalize_A == "cols"
-            assert normalize_H == "cols"
-            assert normalize_W == "cols"
+            assert rho_h > 0
 
         # Save arguments as attributes.
         self.latent_dim = latent_dim
         self.rho_h = rho_h
         self.rho_w = rho_w
         self.eps = eps
-        self.lbda = lbda
         self.use_mod_weight = use_mod_weight
-        self.normalize_H = normalize_H
-        self.normalize_W = normalize_W
-        self.normalize_A = normalize_A
         self.cost = cost
         self.cost_path = cost_path
         self.pca_cost = pca_cost
@@ -247,6 +222,9 @@ class MowgliModel:
         self.lr = lr
         self.optim_name = optim_name
 
+        if not isinstance(self.rho_h, dict):
+            self.rho_h = {mod: self.rho_h for mod in mdata}
+
         # Initialize the loss histories.
         self.losses_w, self.losses_h, self.losses = [], [], []
 
@@ -287,16 +265,8 @@ class MowgliModel:
 
                 # Save the total dual loss and statistics.
                 self.losses.append(self.total_dual_loss().cpu().detach())
-                if self.lbda:
-                    scores = utils.unbalanced_scores(
-                        self.A, self.K, self.G, self.H, self.W, self.eps, self.lbda
-                    )
-                    self.scores_history.append(scores)
-                else:
-                    scores = utils.mass_transported(
-                        self.A, self.G, self.K, self.eps, self.lbda
-                    )
-                    self.scores_history.append(scores)
+                scores = utils.mass_transported(self.A, self.G, self.K, self.eps)
+                self.scores_history.append(scores)
 
                 # Perform the `H` optimization step.
                 self.optimize(
@@ -311,7 +281,7 @@ class MowgliModel:
                 # Update the omic specific factors `H[mod]`.
                 for mod in self.mod:
                     coef = self.latent_dim * np.log(self.n_var[mod])
-                    coef /= self.n_obs * self.rho_h
+                    coef /= self.n_obs * self.rho_h[mod]
                     if self.normalize_H == "cols":
                         self.H[mod] = self.mod_weight[mod] * self.G[mod].detach()
                         self.H[mod] = self.H[mod] @ self.W.T
@@ -329,16 +299,8 @@ class MowgliModel:
 
                 # Save the total dual loss and statistics.
                 self.losses.append(self.total_dual_loss().cpu().detach())
-                if self.lbda:
-                    scores = utils.unbalanced_scores(
-                        self.A, self.K, self.G, self.H, self.W, self.eps, self.lbda
-                    )
-                    self.scores_history.append(scores)
-                else:
-                    scores = utils.mass_transported(
-                        self.A, self.G, self.K, self.eps, self.lbda
-                    )
-                    self.scores_history.append(scores)
+                scores = utils.mass_transported(self.A, self.G, self.K, self.eps)
+                self.scores_history.append(scores)
 
                 # Early stopping
                 if utils.early_stop(self.losses, tol_outer, nonincreasing=True):
@@ -470,7 +432,6 @@ class MowgliModel:
                     self.G[mod],
                     self.K[mod],
                     self.eps,
-                    self.lbda,
                     self.mod_weight[mod],
                 )
                 / self.n_obs
@@ -483,7 +444,7 @@ class MowgliModel:
             loss += lagrange / self.n_obs
 
             # Add the `H[mod]` entropy term.
-            coef = self.rho_h / (self.latent_dim * np.log(self.n_var[mod]))
+            coef = self.rho_h[mod] / (self.latent_dim * np.log(self.n_var[mod]))
             loss -= coef * utils.entropy(self.H[mod], min_one=True)
 
         # Add the `W` entropy term.
@@ -509,14 +470,13 @@ class MowgliModel:
                     self.G[mod],
                     self.K[mod],
                     self.eps,
-                    self.lbda,
                     self.mod_weight[mod],
                 )
                 / self.n_obs
             )
 
             # Entropy dual loss term
-            coef = self.rho_h / (self.latent_dim * np.log(self.n_var[mod]))
+            coef = self.rho_h[mod] / (self.latent_dim * np.log(self.n_var[mod]))
             gwt = self.mod_weight[mod] * self.G[mod] @ self.W.T
             gwt /= self.n_obs * coef
             loss_h -= coef * utils.entropy_dual_loss(-gwt, self.normalize_H)
@@ -547,7 +507,6 @@ class MowgliModel:
                     self.G[mod],
                     self.K[mod],
                     self.eps,
-                    self.lbda,
                     self.mod_weight[mod],
                 )
                 / self.n_obs
