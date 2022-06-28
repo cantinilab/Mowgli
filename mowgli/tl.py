@@ -11,6 +11,9 @@ from typing import Iterable
 # Matrix operations.
 import numpy as np
 
+# For dataframes.
+import pandas as pd
+
 ################################## EMBEDDING ##################################
 
 
@@ -86,7 +89,7 @@ def top_features(
     mod: str = "rna",
     uns: str = "H_OT",
     dim: int = 0,
-    n_features: int = 5,
+    threshold: float = .2,
 ) -> Iterable:
     """Returns the top features for a given modality and latent dimension.
 
@@ -102,6 +105,9 @@ def top_features(
     """
     # TODO: put variable names in uns!
 
+    # Compue the number of features needed.
+    n_features = np.sum(np.cumsum(np.sort(mdata[mod].uns[uns][:, dim])) > threshold)
+
     # Get names for highly variable features.
     idx = mdata[mod].var.highly_variable
     var_names = mdata[mod].var_names[idx]
@@ -111,7 +117,6 @@ def top_features(
 
     # Return the top ones.
     return var_names[var_idx[:n_features]].tolist()
-
 
 def enrich(
     mdata: mu.MuData,

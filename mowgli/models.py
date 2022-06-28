@@ -92,6 +92,7 @@ class MowgliModel:
         dtype: torch.dtype,
         device: torch.device,
         force_recompute: bool = False,
+        normalize_rows: bool = False,
     ) -> None:
         """Initialize parameters based on input data.
 
@@ -139,6 +140,9 @@ class MowgliModel:
             # Normalize the reference dataset, and add a small value
             # for numerical stability.
             self.A[mod] += 1e-6
+            if normalize_rows:
+                mean_row_sum = self.A[mod].sum(1).mean()
+                self.A[mod] /= self.A[mod].sum(1).reshape(-1, 1) * mean_row_sum
             self.A[mod] /= self.A[mod].sum(0)
 
             # Determine which cost function to use.
@@ -186,6 +190,7 @@ class MowgliModel:
         optim_name: str = "lbfgs",
         tol_inner: float = 1e-9,
         tol_outer: float = 1e-3,
+        normalize_rows: bool = False,
     ) -> None:
         """Train the Mowgli model on an input MuData object.
 
@@ -217,7 +222,12 @@ class MowgliModel:
         """
 
         # First, initialize the different parameters.
-        self.init_parameters(mdata, dtype=dtype, device=device)
+        self.init_parameters(
+            mdata,
+            dtype=dtype,
+            device=device,
+            normalize_rows=normalize_rows,
+        )
 
         self.lr = lr
         self.optim_name = optim_name
