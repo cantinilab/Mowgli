@@ -90,7 +90,7 @@ def knn_purity_score(knn: np.ndarray, labels: np.ndarray) -> float:
     assert knn.shape[0] == labels.shape[0]
 
     # Initialize a list of purity scores.
-    scores = []
+    score = 0
 
     # Iterate over the observations.
     for i, neighbors in enumerate(knn):
@@ -99,10 +99,10 @@ def knn_purity_score(knn: np.ndarray, labels: np.ndarray) -> float:
         matches = labels[neighbors] == labels[i]
 
         # Add the purity rate to the scores.
-        scores.append(np.mean(matches))
+        score += np.mean(matches)/knn.shape[0]
 
     # Return the average purity.
-    return np.mean(scores)
+    return score
 
 
 def knn_prediction_score(
@@ -210,16 +210,16 @@ def avg_knn_prediction_score(
     # Initialize the prediction scores.
     scores = 0
 
-    # Initialize the prediction
-    X_predicted = np.zeros_like(X)
-
-    # Iterate over the observations.
-    for i, neighbors in enumerate(knn):
-
-        # Predict cell i from its neighbors.
-        X_predicted[i] = np.mean(X[neighbors], axis=0)
-
     if along == 'var':
+
+        # Initialize the prediction
+        X_predicted = np.zeros_like(X)
+
+        # Iterate over the observations.
+        for i, neighbors in enumerate(knn):
+
+            # Predict cell i from its neighbors.
+            X_predicted[i] = np.mean(X[neighbors], axis=0)
 
         # Iterate over the variables.
         for j in range(X.shape[1]):
@@ -232,7 +232,7 @@ def avg_knn_prediction_score(
         for i in range(X.shape[0]):
 
             # Add the correlation score.
-            scores += corr(X_predicted[i], X[i])[0]/X.shape[0]
+            scores += corr(np.mean(X[knn[i]], axis=0), X[i])[0]/X.shape[0]
 
     # Return the average prediction score
     return scores
