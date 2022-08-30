@@ -21,6 +21,6 @@ setup(
         "matplotlib",
         "plotly",
         "scipy",
-        "sknetwork",
+        "scikit-network",
     ],
 )
