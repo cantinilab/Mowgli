@@ -32,5 +32,5 @@ def test_init():
     assert mdata.obsm["W_OT"].shape == (n_cells, latent_dim)
 
     # Check the size of the dictionaries.
-    assert mdata["rna"].uns["H_OT"].shape == (latent_dim, n_genes)
-    assert mdata["atac"].uns["H_OT"].shape == (latent_dim, n_peaks)
+    assert mdata["rna"].uns["H_OT"].shape == (n_genes, latent_dim)
+    assert mdata["atac"].uns["H_OT"].shape == (n_peaks, latent_dim)
