@@ -1,0 +1,12 @@
+torch
+numpy
+pandas
+sklearn
+muon
+tqdm
+scanpy
+anndata
+matplotlib
+plotly
+scipy
+sknetwork
