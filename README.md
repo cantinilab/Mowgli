@@ -1,6 +1,6 @@
 # Mowgli: Multi Omics Wasserstein inteGrative anaLysIs
 
-<div style="text-align:center;"><img src="logo.png" alt="Mowgli logo" width="50%"/></div>
+<center><img src="logo.png" alt="Mowgli logo" width="50%"/></center>
 
 Mowgli is a novel method for the integration of paired multi-omics data with any type and number of omics, combining integrative Nonnegative Matrix Factorization and Optimal Transport. [Read the preprint!](soon)
 
