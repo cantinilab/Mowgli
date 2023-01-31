@@ -1,6 +1,7 @@
 from context import models
 import muon as mu
 import anndata as ad
+import torch
 import numpy as np
 
 n_cells, n_genes, n_peaks = 20, 50, 5
@@ -54,7 +55,7 @@ def test_custom_params():
         mdata,
         force_recompute=True,
         normalize_rows=True,
-        dtype="float",
+        dtype=torch.float,
         device="cpu",
     )
 
