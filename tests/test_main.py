@@ -47,7 +47,6 @@ def test_custom_params():
         latent_dim=latent_dim,
         h_regularization={"rna": 0.1, "atac": 0.1},
         use_mod_weight=True,
-        normalize_rows=True,
         pca_cost=True,
         optim_name="adam",
         cost_path="cost.npy",
