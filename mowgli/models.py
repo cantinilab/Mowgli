@@ -17,8 +17,8 @@ class MowgliModel:
         self,
         latent_dim: int = 15,
         use_mod_weight: bool = False,
-        rho_h: float = 5e-2,
-        rho_w: float = 5e-2,
+        h_regularization: float = 5e-2,
+        w_regularization: float = 5e-2,
         eps: float = 5e-2,
         cost: str = "cosine",
         pca_cost: bool = False,
@@ -34,10 +34,10 @@ class MowgliModel:
                 Whether to use a different weight for each modality and each
                 cell. If `True`, the weights are expected in the `mod_weight`
                 obs field of each modality. Defaults to False.
-            rho_h (float, optional):
+            h_regularization (float, optional):
                 The entropy parameter for the dictionary. Small values mean
                 sparse dictionaries. Defaults to 5e-2.
-            rho_w (float, optional):
+            w_regularization (float, optional):
                 The entropy parameter for the embedding. Small values mean
                 sparse vectors. Defaults to 5e-2.
             eps (float, optional):
@@ -57,19 +57,19 @@ class MowgliModel:
 
         # Check that the user-defined parameters are valid.
         assert latent_dim > 0
-        assert rho_w > 0
+        assert w_regularization > 0
         assert eps > 0
 
-        if isinstance(rho_h, dict):
-            for mod in rho_h:
-                assert rho_h[mod] > 0
+        if isinstance(h_regularization, dict):
+            for mod in h_regularization:
+                assert h_regularization[mod] > 0
         else:
-            assert rho_h > 0
+            assert h_regularization > 0
 
         # Save arguments as attributes.
         self.latent_dim = latent_dim
-        self.rho_h = rho_h
-        self.rho_w = rho_w
+        self.h_regularization = h_regularization
+        self.w_regularization = w_regularization
         self.eps = eps
         self.use_mod_weight = use_mod_weight
         self.cost = cost
@@ -113,8 +113,8 @@ class MowgliModel:
         self.n_obs = mdata.n_obs
         self.n_var = {}
 
-        if not isinstance(self.rho_h, dict):
-            self.rho_h = {mod: self.rho_h for mod in self.mod}
+        if not isinstance(self.h_regularization, dict):
+            self.h_regularization = {mod: self.h_regularization for mod in self.mod}
 
         # For each modality,
         for mod in self.mod:
@@ -256,7 +256,7 @@ class MowgliModel:
                 htgw = 0
                 for mod in self.mod:
                     htgw += self.H[mod].T @ (self.mod_weight[mod] * self.G[mod])
-                coef = np.log(self.latent_dim) / (self.n_mod * self.rho_w)
+                coef = np.log(self.latent_dim) / (self.n_mod * self.w_regularization)
 
                 self.W = F.softmin(coef * htgw.detach(), dim=0)
 
@@ -284,7 +284,7 @@ class MowgliModel:
                 # Update the omic specific factors `H[mod]`.
                 for mod in self.mod:
                     coef = self.latent_dim * np.log(self.n_var[mod])
-                    coef /= self.n_obs * self.rho_h[mod]
+                    coef /= self.n_obs * self.h_regularization[mod]
 
                     self.H[mod] = self.mod_weight[mod] * self.G[mod].detach()
                     self.H[mod] = self.H[mod] @ self.W.T
@@ -440,11 +440,11 @@ class MowgliModel:
             loss += lagrange / self.n_obs
 
             # Add the `H[mod]` entropy term.
-            coef = self.rho_h[mod] / (self.latent_dim * np.log(self.n_var[mod]))
+            coef = self.h_regularization[mod] / (self.latent_dim * np.log(self.n_var[mod]))
             loss -= coef * utils.entropy(self.H[mod], min_one=True)
 
         # Add the `W` entropy term.
-        coef = self.n_mod * self.rho_w / (self.n_obs * np.log(self.latent_dim))
+        coef = self.n_mod * self.w_regularization / (self.n_obs * np.log(self.latent_dim))
         loss -= coef * utils.entropy(self.W, min_one=True)
 
         # Return the full loss.
@@ -472,7 +472,7 @@ class MowgliModel:
             )
 
             # Entropy dual loss term
-            coef = self.rho_h[mod] / (self.latent_dim * np.log(self.n_var[mod]))
+            coef = self.h_regularization[mod] / (self.latent_dim * np.log(self.n_var[mod]))
             gwt = self.mod_weight[mod] * self.G[mod] @ self.W.T
             gwt /= self.n_obs * coef
             loss_h -= coef * utils.entropy_dual_loss(-gwt)
@@ -509,7 +509,7 @@ class MowgliModel:
             )
 
         # Entropy dual loss term.
-        coef = self.n_mod * self.rho_w
+        coef = self.n_mod * self.w_regularization
         coef /= self.n_obs * np.log(self.latent_dim)
         htgw /= coef * self.n_obs
         loss_w -= coef * utils.entropy_dual_loss(-htgw)

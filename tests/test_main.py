@@ -1,4 +1,3 @@
-from array import ArrayType
 from context import models
 import muon as mu
 import anndata as ad
