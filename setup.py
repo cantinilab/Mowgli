@@ -13,7 +13,7 @@ setup(
         "torch",
         "numpy",
         "pandas",
-        "sklearn",
+        "scikit-learn",
         "muon",
         "tqdm",
         "scanpy",
@@ -21,6 +21,5 @@ setup(
         "matplotlib",
         "plotly",
         "scipy",
-        "scikit-network",
     ],
 )

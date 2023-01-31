@@ -1,7 +1,7 @@
 torch
 numpy
 pandas
-sklearn
+scikit-learn
 muon
 tqdm
 scanpy
@@ -9,4 +9,3 @@ anndata
 matplotlib
 plotly
 scipy
-scikit-network
