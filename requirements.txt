@@ -8,3 +8,4 @@ scanpy
 anndata
 matplotlib
 scipy
+gprofiler-official

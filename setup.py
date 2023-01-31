@@ -20,5 +20,6 @@ setup(
         "anndata",
         "matplotlib",
         "scipy",
+        "gprofiler-official",
     ],
 )
