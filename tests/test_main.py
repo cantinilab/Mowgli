@@ -116,4 +116,4 @@ def test_tools():
     tl.top_features(mdata, mod="atac", dim=0, threshold=0.2)
 
     # Compute enrichment.
-    tl.enrichment(mdata, n_genes=10, ordered=False)
+    tl.enrich(mdata, n_genes=10, ordered=False)
