@@ -47,7 +47,10 @@ sc.tl.umap(mdata)
 sc.pl.umap(mdata)
 ```
 
-## Citation
+## Our preprint
+
 ```bibtex
 Preprint available soon!
 ```
+
+If you're looking for the repository with code to reproduce the experiments in our preprint, [here is is!](https://github.com/cantinilab/mowgli_reproducibility)
