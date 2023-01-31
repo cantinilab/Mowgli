@@ -48,13 +48,12 @@ def test_custom_params():
         h_regularization={"rna": 0.1, "atac": 0.1},
         use_mod_weight=True,
         pca_cost=True,
-        optim_name="adam",
         cost_path="cost.npy",
     )
     model.init_parameters(mdata, force_recompute=True, normalize_rows=True)
 
     # Train the model.
-    model.train(mdata)
+    model.train(mdata, optim_name="adam")
 
     # Check the size of the embedding.
     assert mdata.obsm["W_OT"].shape == (n_cells, latent_dim)
