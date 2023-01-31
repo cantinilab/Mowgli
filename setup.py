@@ -19,7 +19,6 @@ setup(
         "scanpy",
         "anndata",
         "matplotlib",
-        "plotly",
         "scipy",
     ],
 )

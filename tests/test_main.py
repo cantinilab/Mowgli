@@ -1,4 +1,4 @@
-from context import models
+from context import models, pl
 import muon as mu
 import anndata as ad
 import torch
@@ -20,6 +20,7 @@ mdata = mu.MuData({"rna": rna, "atac": atac})
 
 mdata.obs["rna:mod_weight"] = 0.5
 mdata.obs["atac:mod_weight"] = 0.5
+mdata.obs["label"] = np.random.choice(["A", "B", "C"], size=n_cells)
 
 
 def test_default_params():
@@ -39,6 +40,27 @@ def test_default_params():
     # Check the size of the dictionaries.
     assert mdata["rna"].uns["H_OT"].shape == (n_genes, latent_dim)
     assert mdata["atac"].uns["H_OT"].shape == (n_peaks, latent_dim)
+
+
+def test_plotting():
+
+    # Initialize the Mowgli model.
+    model = models.MowgliModel(
+        latent_dim=latent_dim,
+        cost_path="cost.npy",
+    )
+
+    # Train the model.
+    model.train(mdata)
+    
+    # Make a clustermap.
+    pl.clustermap(mdata)
+
+    # Make a violin plot.
+    pl.factor_violin(mdata, groupby="label", dim=0)
+
+    # Make a heatmap.
+    pl.heatmap(mdata, groupby="label")
 
 
 def test_custom_params():
