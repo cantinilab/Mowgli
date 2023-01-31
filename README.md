@@ -1,4 +1,6 @@
 # Mowgli: Multi Omics Wasserstein inteGrative anaLysIs
+[![Tests](https://github.com/gjhuizing/Mowgli/actions/workflows/main.yml/badge.svg)](https://github.com/gjhuizing/Mowgli/actions/workflows/main.yml)
+[![codecov](https://codecov.io/gh/gjhuizing/Mowgli/branch/main/graph/badge.svg?token=UBUJF7098Q)](https://codecov.io/gh/gjhuizing/Mowgli)
 
 <p align="center">
 <img src="logo.png" alt="Mowgli logo" width="50%"/>
