@@ -3,7 +3,7 @@ import numpy as np
 from scipy.stats import pearsonr, spearmanr
 from sklearn.metrics import silhouette_score
 from scipy.sparse import csr_matrix
-from sknetwork.topology import get_connected_components
+# from sknetwork.topology import get_connected_components
 from scipy.spatial.distance import cdist
 from sklearn.metrics import adjusted_rand_score as ARI
 from sklearn.metrics import normalized_mutual_info_score as NMI
