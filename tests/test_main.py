@@ -50,7 +50,13 @@ def test_custom_params():
         pca_cost=True,
         cost_path="cost.npy",
     )
-    model.init_parameters(mdata, force_recompute=True, normalize_rows=True)
+    model.init_parameters(
+        mdata,
+        force_recompute=True,
+        normalize_rows=True,
+        dtype="float",
+        device="cpu",
+    )
 
     # Train the model.
     model.train(mdata, optim_name="adam")
