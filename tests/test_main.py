@@ -1,4 +1,4 @@
-from context import models, pl, tl
+from context import models, pl, tl, score
 import muon as mu
 import anndata as ad
 import torch
@@ -117,3 +117,27 @@ def test_tools():
 
     # Compute enrichment.
     tl.enrich(mdata, n_genes=10, ordered=False)
+
+
+def test_score():
+
+    # Compute a silhouette score.
+    score.embedding_silhouette_score(
+        embedding=mdata.obsm["W_OT"],
+        labels=mdata.obs["label"],
+        metric="euclidean",
+    )
+
+    # Compute leiden clustering across resolutions.
+    score.embedding_leiden_across_resolutions(
+        embedding=mdata.obsm["W_OT"],
+        labels=mdata.obs["label"],
+        n_neighbors=10,
+        resolutions=[0.1, 0.5, 1.0],
+    )
+
+    # Compute a knn from the embedding.
+    knn = score.embedding_to_knn(embedding=mdata.obsm["W_OT"], k=15, metric="euclidean")
+
+    # Compute the knn purity score.
+    score.knn_purity_score(knn=knn, labels=mdata.obs["label"])
