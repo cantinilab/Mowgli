@@ -330,7 +330,11 @@ class MowgliModel:
         """
         if optim_name == "lbfgs":
             return optim.LBFGS(
-                params, lr=lr, history_size=5, max_iter=1, line_search_fn="strong_wolfe"
+                params,
+                lr=lr,
+                history_size=5,
+                max_iter=1,
+                line_search_fn="strong_wolfe",
             )
         elif optim_name == "sgd":
             return optim.SGD(params, lr=lr)
@@ -440,11 +444,15 @@ class MowgliModel:
             loss += lagrange / self.n_obs
 
             # Add the `H[mod]` entropy term.
-            coef = self.h_regularization[mod] / (self.latent_dim * np.log(self.n_var[mod]))
+            coef = self.h_regularization[mod] / (
+                self.latent_dim * np.log(self.n_var[mod])
+            )
             loss -= coef * utils.entropy(self.H[mod], min_one=True)
 
         # Add the `W` entropy term.
-        coef = self.n_mod * self.w_regularization / (self.n_obs * np.log(self.latent_dim))
+        coef = (
+            self.n_mod * self.w_regularization / (self.n_obs * np.log(self.latent_dim))
+        )
         loss -= coef * utils.entropy(self.W, min_one=True)
 
         # Return the full loss.
@@ -472,7 +480,9 @@ class MowgliModel:
             )
 
             # Entropy dual loss term
-            coef = self.h_regularization[mod] / (self.latent_dim * np.log(self.n_var[mod]))
+            coef = self.h_regularization[mod] / (
+                self.latent_dim * np.log(self.n_var[mod])
+            )
             gwt = self.mod_weight[mod] * self.G[mod] @ self.W.T
             gwt /= self.n_obs * coef
             loss_h -= coef * utils.entropy_dual_loss(-gwt)
