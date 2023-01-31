@@ -1,10 +1,34 @@
-from context import models, pl
+from context import models, pl, tl
 import muon as mu
 import anndata as ad
 import torch
 import numpy as np
 
-n_cells, n_genes, n_peaks = 20, 50, 5
+# Define some gene names (useful for enrichment analysis).
+gene_names = [
+    "ENSG00000125877",
+    "ENSG00000184840",
+    "ENSG00000164440",
+    "ENSG00000177144",
+    "ENSG00000186815",
+    "ENSG00000079974",
+    "ENSG00000136159",
+    "ENSG00000177243",
+    "ENSG00000163932",
+    "ENSG00000112799",
+    "ENSG00000075618",
+    "ENSG00000092531",
+    "ENSG00000171408",
+    "ENSG00000150527",
+    "ENSG00000202429",
+    "ENSG00000140807",
+    "ENSG00000154589",
+    "ENSG00000166263",
+    "ENSG00000205268",
+    "ENSG00000115008",
+]
+
+n_cells, n_genes, n_peaks = 20, len(gene_names), 5
 latent_dim = 5
 
 # Create a random anndata object for RNA.
@@ -42,27 +66,6 @@ def test_default_params():
     assert mdata["atac"].uns["H_OT"].shape == (n_peaks, latent_dim)
 
 
-def test_plotting():
-
-    # Initialize the Mowgli model.
-    model = models.MowgliModel(
-        latent_dim=latent_dim,
-        cost_path="cost.npy",
-    )
-
-    # Train the model.
-    model.train(mdata)
-    
-    # Make a clustermap.
-    pl.clustermap(mdata)
-
-    # Make a violin plot.
-    pl.factor_violin(mdata, groupby="label", dim=0)
-
-    # Make a heatmap.
-    pl.heatmap(mdata, groupby="label")
-
-
 def test_custom_params():
 
     # Initialize the Mowgli model.
@@ -90,3 +93,27 @@ def test_custom_params():
     # Check the size of the dictionaries.
     assert mdata["rna"].uns["H_OT"].shape == (n_genes, latent_dim)
     assert mdata["atac"].uns["H_OT"].shape == (n_peaks, latent_dim)
+
+
+def test_plotting():
+
+    # Make a clustermap.
+    pl.clustermap(mdata)
+
+    # Make a violin plot.
+    pl.factor_violin(mdata, groupby="label", dim=0)
+
+    # Make a heatmap.
+    pl.heatmap(mdata, groupby="label")
+
+
+def test_tools():
+
+    # Compute top genes.
+    tl.top_features(mdata, mod="rna", dim=0, threshold=0.2)
+
+    # Compute top peaks.
+    tl.top_features(mdata, mod="atac", dim=0, threshold=0.2)
+
+    # Compute enrichment.
+    tl.enrichment(mdata, n_genes=10, ordered=False)

@@ -1,9 +1,6 @@
-################################### IMPORTS ###################################
-
 # Biology imports.
 import scanpy as sc
 import muon as mu
-import anndata as ad
 
 # Typing imports.
 from typing import Iterable
@@ -11,85 +8,13 @@ from typing import Iterable
 # Matrix operations.
 import numpy as np
 
-# For dataframes.
-import pandas as pd
-
-################################## EMBEDDING ##################################
-
-
-def umap(
-    mdata: mu.MuData,
-    obsm: str,
-    n_neighbors: int = 15,
-    metric: str = "euclidean",
-    **kwds
-) -> None:
-    """Compute UMAP of the given `obsm`.
-
-    Args:
-        mdata (mu.MuData): Input data.
-        obsm (str): The embedding.
-        n_neighbors (int, optional):
-            Number of neighbors for UMAP. Defaults to 15.
-        metric (str, optional):
-            Which metric to compute neighbors. Defaults to 'euclidean'.
-    """
-
-    # Create an AnnData from the joint embedding.
-    joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
-
-    # Compute neighbours on that embedding.
-    sc.pp.neighbors(
-        joint_embedding, use_rep="X", n_neighbors=n_neighbors, metric=metric
-    )
-
-    # Compute UMAP based on these neighbours.
-    sc.tl.umap(joint_embedding, **kwds)
-
-    # Copy the UMPA embedding to the input data's obsm field.
-    mdata.obsm[obsm + "_umap"] = joint_embedding.obsm["X_umap"]
-
-
-################################## CLUSTERING #################################
-
-
-def leiden(
-    mdata: mu.MuData,
-    n_neighbors: int = 15,
-    obsm: str = "W_OT",
-    resolution: float = 1,
-):
-    """Perform Leiden clustering on the joint embedding.
-
-    Args:
-        mdata (mu.MuData): The input data.
-        n_neighbors (int, optional): Number of neighbours. Defaults to 15.
-        obsm (str, optional): Which obsm field to consider. Defaults to 'W_OT'.
-        resolution (float, optional): The Leiden resolution. Defaults to 1.
-    """
-
-    # Create an AnnData from the joint embedding.
-    joint_embedding = ad.AnnData(mdata.obsm[obsm], obs=mdata.obs)
-
-    # Compute neighbors based on that joint embedding.
-    sc.pp.neighbors(joint_embedding, use_rep="X", n_neighbors=n_neighbors)
-
-    # Perform Leiden clustering.
-    sc.tl.leiden(joint_embedding, resolution=resolution)
-
-    # Copy the Leiden labels to the input object.
-    mdata.obs["leiden"] = joint_embedding.obs["leiden"]
-
-
-############################### ANALYSE FACTORS ###############################
-
 
 def top_features(
     mdata: mu.MuData,
     mod: str = "rna",
     uns: str = "H_OT",
     dim: int = 0,
-    threshold: float = .2,
+    threshold: float = 0.2,
 ) -> Iterable:
     """Returns the top features for a given modality and latent dimension.
 
@@ -117,6 +42,7 @@ def top_features(
 
     # Return the top ones.
     return var_names[var_idx[:n_features]].tolist()
+
 
 def enrich(
     mdata: mu.MuData,
