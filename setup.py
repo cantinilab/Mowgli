@@ -21,5 +21,6 @@ setup(
         "matplotlib",
         "scipy",
         "gprofiler-official",
+        "leidenalg",
     ],
 )

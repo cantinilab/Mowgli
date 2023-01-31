@@ -9,3 +9,4 @@ anndata
 matplotlib
 scipy
 gprofiler-official
+leidenalg
