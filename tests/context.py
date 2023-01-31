@@ -4,4 +4,4 @@ import sys
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 import mowgli
-from mowgli import models
+from mowgli import models, pl, tl, score

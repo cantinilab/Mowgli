@@ -2,6 +2,7 @@ import scanpy as sc
 import muon as mu
 import anndata as ad
 
+
 def clustermap(mdata: mu.MuData, obsm: str = "W_OT", cmap="viridis", **kwds):
     """Wrapper around Scanpy's clustermap.
 
@@ -19,7 +20,11 @@ def clustermap(mdata: mu.MuData, obsm: str = "W_OT", cmap="viridis", **kwds):
 
 
 def factor_violin(
-    mdata: mu.MuData, groupby: str, obsm: str = "W_OT", dim: int = 0, **kwds
+    mdata: mu.MuData,
+    groupby: str,
+    obsm: str = "W_OT",
+    dim: int = 0,
+    **kwds,
 ):
     """Make a violin plot of cells for a given latent dimension.
 
@@ -47,7 +52,7 @@ def heatmap(
     cmap: str = "viridis",
     sort_var: bool = False,
     save: str = None,
-    **kwds
+    **kwds,
 ) -> None:
     """Produce a heatmap of an embedding
 
