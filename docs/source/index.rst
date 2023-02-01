@@ -20,7 +20,7 @@ Mowgli: Multi Omics Wasserstein inteGrative anaLysIs
    utils
 
 
-Mowgli is a novel method for the integration of paired multi-omics data with any type and number of omics, combining integrative Nonnegative Matrix Factorization and Optimal Transport. `Read the preprint! <http://soon>`_
+Mowgli is a novel method for the integration of paired multi-omics data with any type and number of omics, combining integrative Nonnegative Matrix Factorization and Optimal Transport. `Read the preprint here <http://soon>`_ and `fork the code here <https://github.com/cantinilab/Mowgli>`_!
 
 Install the package
 -------------------
@@ -45,7 +45,7 @@ via GitHub (development version)
 Getting started
 ---------------
 
-Mowgli takes as an input a Muon object and populates its `obsm` and `uns` fiels with the embeddings and dictionaries, respectively. Visit `mowgli.rtfd.io <https://mowgli.rtfd.io/>`_ for more documentation and tutorials.
+Mowgli takes as an input a Muon object and populates its `obsm` and `uns` fiels with the embeddings and dictionaries, respectively. Visit the **Getting started** and **API** sections for more documentation and tutorials.
 
 .. code-block:: python
 

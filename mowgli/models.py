@@ -229,6 +229,10 @@ class MowgliModel:
             normalize_rows=normalize_rows,
         )
 
+        # This is needed to save things in uns if it doesn't exist.
+        if mdata.uns == None:
+            mdata.uns = {}
+
         self.lr = lr
         self.optim_name = optim_name
 
