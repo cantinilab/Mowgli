@@ -2,11 +2,9 @@
 [![Tests](https://github.com/gjhuizing/Mowgli/actions/workflows/main.yml/badge.svg)](https://github.com/gjhuizing/Mowgli/actions/workflows/main.yml)
 [![codecov](https://codecov.io/gh/gjhuizing/Mowgli/branch/main/graph/badge.svg?token=UBUJF7098Q)](https://codecov.io/gh/gjhuizing/Mowgli)
 
-<p align="center">
-<img src="logo.png" alt="Mowgli logo" width="50%"/>
-</p>
-
 Mowgli is a novel method for the integration of paired multi-omics data with any type and number of omics, combining integrative Nonnegative Matrix Factorization and Optimal Transport. [Read the preprint!](soon)
+
+![figure](figure.png)
 
 ## Install the package
 
