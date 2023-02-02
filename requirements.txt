@@ -11,3 +11,4 @@ scipy
 gprofiler-official
 leidenalg
 nbsphinx
+furo

@@ -23,5 +23,6 @@ setup(
         "gprofiler-official",
         "leidenalg",
         "nbsphinx",
+        "furo",
     ],
 )
