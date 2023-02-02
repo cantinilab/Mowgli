@@ -22,5 +22,6 @@ setup(
         "scipy",
         "gprofiler-official",
         "leidenalg",
+        "nbsphinx",
     ],
 )
