@@ -2,7 +2,7 @@
 [![Tests](https://github.com/gjhuizing/Mowgli/actions/workflows/main.yml/badge.svg)](https://github.com/gjhuizing/Mowgli/actions/workflows/main.yml)
 [![codecov](https://codecov.io/gh/gjhuizing/Mowgli/branch/main/graph/badge.svg?token=UBUJF7098Q)](https://codecov.io/gh/gjhuizing/Mowgli)
 
-Mowgli is a novel method for the integration of paired multi-omics data with any type and number of omics, combining integrative Nonnegative Matrix Factorization and Optimal Transport. [Read the preprint!](soon)
+Mowgli is a novel method for the integration of paired multi-omics data with any type and number of omics, combining integrative Nonnegative Matrix Factorization and Optimal Transport. [Read the preprint!](https://www.biorxiv.org/content/10.1101/2023.02.02.526825v1)
 
 ![figure](figure.png)
 
@@ -48,7 +48,14 @@ sc.pl.umap(mdata)
 ## Our preprint
 
 ```bibtex
-Preprint available soon!
+@article{huizing2023paired,
+  title={Paired single-cell multi-omics data integration with Mowgli},
+  author={Huizing, Geert-Jan and Deutschmann, Ina Maria and Peyre, Gabriel and Cantini, Laura},
+  journal={bioRxiv},
+  pages={2023--02},
+  year={2023},
+  publisher={Cold Spring Harbor Laboratory}
+}
 ```
 
 If you're looking for the repository with code to reproduce the experiments in our preprint, [here is is!](https://github.com/cantinilab/mowgli_reproducibility)
