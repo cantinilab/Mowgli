@@ -1,0 +1,32 @@
+[tool.poetry]
+name = "mowgli"
+version = "0.1.0"
+description = "Mowgli is a novel method for the integration of paired multi-omics data with any type and number of omics, combining integrative Nonnegative Matrix Factorization and Optimal Transport."
+authors = ["Geert-Jan Huizing <huizing@ens.fr>"]
+license = "GPL-3.0-only"
+readme = "README.md"
+
+[tool.poetry.dependencies]
+python = ">=3.8,<3.12"
+torch = "^1.13.1"
+numpy = "^1.24.2"
+mudata = "^0.2.1"
+tqdm = "^4.64.1"
+scanpy = "^1.9.1"
+anndata = "^0.8.0"
+matplotlib = "^3.6.3"
+scikit-learn = "^1.2.1"
+scipy = "^1.10.0"
+
+nbsphinx = { version = "^0.8.12", optional = true }
+furo = { version = "^2022.12.7", optional = true }
+gprofiler-official = { version = "^1.0.0", optional = true }
+leidenalg = { version = "^0.9.1", optional = true }
+
+[tool.poetry.extras]
+docs = ["nbsphinx", "furo"]
+full = ["gprofiler-official", "leidenalg"]
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
