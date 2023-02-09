@@ -6,7 +6,7 @@ import numpy as np
 from sklearn.decomposition import PCA
 
 from typing import Callable, List
-import muon as mu
+import mudata as md
 from tqdm import tqdm
 
 from mowgli import utils
@@ -87,7 +87,7 @@ class MowgliModel:
 
     def init_parameters(
         self,
-        mdata: mu.MuData,
+        mdata: md.MuData,
         dtype: torch.dtype,
         device: torch.device,
         force_recompute: bool = False,
@@ -96,7 +96,7 @@ class MowgliModel:
         """Initialize parameters based on input data.
 
         Args:
-            mdata (mu.MuData):
+            mdata (md.MuData):
                 The input MuData object.
             dtype (torch.dtype):
                 The dtype to work with.
@@ -180,7 +180,7 @@ class MowgliModel:
 
     def train(
         self,
-        mdata: mu.MuData,
+        mdata: md.MuData,
         max_iter_inner: int = 1_000,
         max_iter: int = 100,
         device: torch.device = "cpu",
@@ -194,7 +194,7 @@ class MowgliModel:
         """Train the Mowgli model on an input MuData object.
 
         Args:
-            mdata (mu.MuData):
+            mdata (md.MuData):
                 The input MuData object.?
             max_iter_inner (int, optional):
                 How many iterations for the inner optimization loop
