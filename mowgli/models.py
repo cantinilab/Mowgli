@@ -81,7 +81,6 @@ class MowgliModel:
 
         # Initialize the loss and statistics histories.
         self.losses_w, self.losses_h, self.losses = [], [], []
-        self.scores_history = [0]  # TODO: change this
 
         # Initialize the dictionaries containing matrices for each omics.
         self.A, self.H, self.G, self.K = {}, {}, {}, {}
@@ -272,8 +271,6 @@ class MowgliModel:
 
                 # Save the total dual loss and statistics.
                 self.losses.append(self.total_dual_loss().cpu().detach())
-                scores = utils.mass_transported(self.A, self.G, self.K, self.eps)
-                self.scores_history.append(scores)
 
                 # Perform the `H` optimization step.
                 self.optimize(
@@ -299,8 +296,6 @@ class MowgliModel:
 
                 # Save the total dual loss and statistics.
                 self.losses.append(self.total_dual_loss().cpu().detach())
-                scores = utils.mass_transported(self.A, self.G, self.K, self.eps)
-                self.scores_history.append(scores)
 
                 # Early stopping
                 if utils.early_stop(self.losses, tol_outer, nonincreasing=True):
@@ -400,7 +395,6 @@ class MowgliModel:
                 pbar.set_postfix(
                     {
                         "loss": total_loss,
-                        "mass_transported": self.scores_history[-1],
                         "loss_inner": history[-1].cpu().numpy(),
                         "inner_steps": i,
                         "gpu_memory_allocated": gpu_mem_alloc,

@@ -132,43 +132,6 @@ def entropy_dual_loss(Y: torch.Tensor) -> torch.Tensor:
     return -torch.logsumexp(Y, dim=0).sum()
 
 
-def mass_transported(
-    A: dict, G: dict, K: dict, eps: float, per_cell: bool = False, per_mod: bool = False
-):
-    """Compute the amount of mass transported, i.e. the mass outside of
-    the diagonal in the transport plan.
-
-    Args:
-        A (dict): The dataset.
-        G (dict): The dual variable.
-        K (dict): The kernel.
-        eps (_type_): The OT entropic regularization.
-        per_cell (bool, optional): Whether to return for each cell separately. Defaults to False.
-        per_mod (bool, optional): Whether to return for each modality separately. Defaults to False.
-
-    Returns: The mass transported (dictionary of array).
-    """
-    score = {} if per_mod else 0
-    for mod in A:
-
-        prod = torch.exp(G[mod] / eps)
-        prod /= K[mod] @ prod
-
-        # Compute per cell or summing everything.
-        if per_cell:
-            s = torch.sum(A[mod] * prod, dim=0)
-        else:
-            s = torch.sum(A[mod] * prod) / A[mod].shape[1]
-
-        # Compute the modality of summing everything.
-        if per_mod:
-            score[mod] = 1 - s.detach().cpu().numpy()
-        else:
-            score += (1 - s.detach().cpu().numpy()) / len(A)
-
-    return score
-
-
 def ot_dual_loss(
     A: dict, G: dict, K: dict, eps: float, mod_weights: torch.Tensor, dim=(0, 1)
 ) -> torch.Tensor:
