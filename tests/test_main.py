@@ -52,7 +52,10 @@ def test_default_params():
     # Initialize the Mowgli model.
     model = models.MowgliModel(
         latent_dim=latent_dim,
-        cost_path="cost.npy",
+        cost_path={
+            "rna": "cost_rna.npy",
+            "atac": "cost_atac.npy",
+        },
     )
 
     # Train the model.
@@ -74,7 +77,10 @@ def test_custom_params():
         h_regularization={"rna": 0.1, "atac": 0.1},
         use_mod_weight=True,
         pca_cost=True,
-        cost_path="cost.npy",
+        cost_path={
+            "rna": "cost_rna.npy",
+            "atac": "cost_atac.npy",
+        },
     )
     model.init_parameters(
         mdata,
@@ -98,13 +104,13 @@ def test_custom_params():
 def test_plotting():
 
     # Make a clustermap.
-    pl.clustermap(mdata)
+    pl.clustermap(mdata, show=False)
 
     # Make a violin plot.
-    pl.factor_violin(mdata, groupby="label", dim=0)
+    pl.factor_violin(mdata, groupby="label", dim=0, show=False)
 
     # Make a heatmap.
-    pl.heatmap(mdata, groupby="label")
+    pl.heatmap(mdata, groupby="label", show=False)
 
 
 def test_tools():
