@@ -8,20 +8,20 @@ readme = "README.md"
 
 [tool.poetry.dependencies]
 python = ">=3.8,<3.12"
-torch = "*"
-numpy = "*"
-mudata = "*"
-tqdm = "*"
-scanpy = "*"
-anndata = "*"
-matplotlib = "*"
-scikit-learn = "*"
-scipy = "*"
+torch = "^1.0.0"
+numpy = "^1.0.0"
+mudata = "^0.2.1"
+tqdm = "^4.0.0"
+scanpy = "^1.0.0"
+anndata = "^0.8.0"
+matplotlib = "^3.0.0"
+scikit-learn = "^1.0.0"
+scipy = "^1.0.0"
 
-nbsphinx = { version = "*", optional = true }
-furo = { version = "*", optional = true }
-gprofiler-official = { version = "*", optional = true }
-leidenalg = { version = "*", optional = true }
+nbsphinx = { version = "^0.8.12", optional = true }
+furo = { version = "^2022.12.7", optional = true }
+gprofiler-official = { version = "^1.0.0", optional = true }
+leidenalg = { version = "^0.9.1", optional = true }
 
 [tool.poetry.extras]
 docs = ["nbsphinx", "furo"]
