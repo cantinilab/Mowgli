@@ -1,0 +1,13 @@
+torch >= 1.0.0
+numpy >= 1.0.0
+mudata >= 0.2.1
+tqdm >= 4.0.0
+scanpy >= 1.0.0
+anndata >= 0.8.0
+matplotlib >= 3.0.0
+scikit-learn >= 1.0.0
+scipy >= 1.0.0
+nbsphinx >= 0.8.12
+furo >= 2022.12.7
+gprofiler-official >= 1.0.0
+leidenalg >= 0.9.1
