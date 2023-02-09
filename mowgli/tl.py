@@ -1,6 +1,6 @@
 # Biology imports.
 import scanpy as sc
-import muon as mu
+import mudata as md
 
 # Typing imports.
 from typing import Iterable
@@ -10,7 +10,7 @@ import numpy as np
 
 
 def top_features(
-    mdata: mu.MuData,
+    mdata: md.MuData,
     mod: str = "rna",
     uns: str = "H_OT",
     dim: int = 0,
@@ -19,7 +19,7 @@ def top_features(
     """Returns the top features for a given modality and latent dimension.
 
     Args:
-        mdata (mu.MuData): The input data
+        mdata (md.MuData): The input data
         mod (str, optional): The modality. Defaults to 'rna'.
         uns (str, optional): Where to look for H. Defaults to 'H_OT'.
         dim (int, optional): The latent dimension. Defaults to 0.
@@ -45,7 +45,7 @@ def top_features(
 
 
 def enrich(
-    mdata: mu.MuData,
+    mdata: md.MuData,
     mod: str = "rna",
     uns: str = "H_OT",
     n_genes: int = 200,
@@ -56,7 +56,7 @@ def enrich(
     """Return Gene Set Enrichment Analysis results for each dimension.
 
     Args:
-        mdata (mu.MuData): Input data.
+        mdata (md.MuData): Input data.
         mod (str, optional): Modality that contains genes. Defaults to 'rna'.
         uns (str, optional): Name of H matrix. Defaults to 'H_OT'.
         n_genes (int, optional):

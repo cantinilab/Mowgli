@@ -28,15 +28,15 @@ pip install ./Mowgli/
 Mowgli takes as an input a Muon object and populates its `obsm` and `uns` fiels with the embeddings and dictionaries, respectively. Visit [mowgli.rtfd.io](https://mowgli.rtfd.io/) for more documentation and tutorials.
 
 ```python
-from mowgli import models
-import muon as mu
+import mowgli
+import mudata as md
 import scanpy as sc
 
 # Load data into a Muon object.
-mdata = mu.load_h5mu("my_data.h5mu")
+mdata = md.read_h5mu("my_data.h5mu")
 
 # Initialize and train the model.
-model = models.MowgliModel(latent_dim=15)
+model = mowgli.models.MowgliModel(latent_dim=15)
 model.train(mdata)
 
 # Visualize the embedding with UMAP.

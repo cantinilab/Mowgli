@@ -1,13 +1,13 @@
 import scanpy as sc
-import muon as mu
+import mudata as md
 import anndata as ad
 
 
-def clustermap(mdata: mu.MuData, obsm: str = "W_OT", cmap="viridis", **kwds):
+def clustermap(mdata: md.MuData, obsm: str = "W_OT", cmap="viridis", **kwds):
     """Wrapper around Scanpy's clustermap.
 
     Args:
-        mdata (mu.MuData): The input data
+        mdata (md.MuData): The input data
         obsm (str, optional): The obsm field to consider. Defaults to 'W_OT'.
         cmap (str, optional): The colormap. Defaults to 'viridis'.
     """
@@ -20,7 +20,7 @@ def clustermap(mdata: mu.MuData, obsm: str = "W_OT", cmap="viridis", **kwds):
 
 
 def factor_violin(
-    mdata: mu.MuData,
+    mdata: md.MuData,
     groupby: str,
     obsm: str = "W_OT",
     dim: int = 0,
@@ -29,7 +29,7 @@ def factor_violin(
     """Make a violin plot of cells for a given latent dimension.
 
     Args:
-        mdata (mu.MuData): The input data
+        mdata (md.MuData): The input data
         dim (int, optional): The latent dimension. Defaults to 0.
         obsm (str, optional): The embedding. Defaults to 'W_OT'.
         groupby (str, optional): Observation groups.
@@ -46,7 +46,7 @@ def factor_violin(
 
 
 def heatmap(
-    mdata: mu.MuData,
+    mdata: md.MuData,
     groupby: str,
     obsm: str = "W_OT",
     cmap: str = "viridis",
@@ -57,7 +57,7 @@ def heatmap(
     """Produce a heatmap of an embedding
 
     Args:
-        mdata (mu.MuData): Input data
+        mdata (md.MuData): Input data
         groupby (str): What to group by
         obsm (str): The embedding. Defaults to 'W_OT'.
         cmap (str, optional): Color map. Defaults to 'viridis'.

@@ -1,5 +1,5 @@
 from context import models, pl, tl, score
-import muon as mu
+import mudata as md
 import anndata as ad
 import torch
 import numpy as np
@@ -40,7 +40,7 @@ atac = ad.AnnData(np.random.rand(n_cells, n_peaks))
 atac.var["highly_variable"] = True
 
 # Create a MuData object combining RNA and ATAC.
-mdata = mu.MuData({"rna": rna, "atac": atac})
+mdata = md.MuData({"rna": rna, "atac": atac})
 
 mdata.obs["rna:mod_weight"] = 0.5
 mdata.obs["atac:mod_weight"] = 0.5

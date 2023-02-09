@@ -81,7 +81,7 @@ def compute_ground_cost(
     K = torch.from_numpy(K).to(device=device, dtype=dtype)
     K /= eps * K.max()
 
-    # Compute the kernel K
+    # Compute the kernel K.
     K = torch.exp(-K).to(device=device, dtype=dtype)
 
     return K

@@ -14,7 +14,7 @@ setup(
         "numpy",
         "pandas",
         "scikit-learn",
-        "muon",
+        "mudata",
         "tqdm",
         "scanpy",
         "anndata",
