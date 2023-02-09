@@ -22,6 +22,9 @@ def reference_dataset(
     # Keep only the highly variable features.
     A = X[:, keep_idx].T
 
+    # Check that the dataset is positive.
+    assert (A >= 0).all()
+
     # If the dataset is sparse, make it dense.
     try:
         A = A.todense()

@@ -195,7 +195,7 @@ class MowgliModel:
 
         Args:
             mdata (md.MuData):
-                The input MuData object.?
+                The input MuData object.
             max_iter_inner (int, optional):
                 How many iterations for the inner optimization loop
                 (optimizing H, or W). Defaults to 1_000.
