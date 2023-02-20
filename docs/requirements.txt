@@ -11,4 +11,4 @@ nbsphinx >= 0.8.12
 furo >= 2022.12.7
 gprofiler-official >= 1.0.0
 leidenalg >= 0.9.1
--e ..
+.
