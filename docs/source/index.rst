@@ -75,4 +75,11 @@ Citation
 
 .. code-block:: bibtex
 
-   Preprint available soon!
+  @article{huizing2023paired,
+     title={Paired single-cell multi-omics data integration with Mowgli},
+     author={Huizing, Geert-Jan and Deutschmann, Ina Maria and Peyre, Gabriel and Cantini, Laura},
+     journal={bioRxiv},
+     pages={2023--02},
+     year={2023},
+     publisher={Cold Spring Harbor Laboratory}
+   }
