@@ -12,7 +12,7 @@ Mowgli is implemented as a Python package seamlessly integrated within the scver
 
 ### via PyPI (recommended)
 
-The easiest way to install Mowgli is via PyPI. Installation should typically take a minute and is continuously tested on Python 3.8.
+On all operating systems, the easiest way to install Mowgli is via PyPI. Installation should typically take a minute and is continuously tested with Python 3.8 on an Ubuntu virtual machine.
 
 ```bash
 pip install mowgli
