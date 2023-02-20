@@ -12,7 +12,7 @@ Mowgli is implemented as a Python package seamlessly integrated within the scver
 
 ### via PyPI (recommended)
 
-The easiest way to install Mowgli is via PyPI. Installation should typically take a minute.
+The easiest way to install Mowgli is via PyPI. Installation should typically take a minute and is continuously tested on Python 3.8.
 
 ```bash
 pip install mowgli
@@ -31,7 +31,7 @@ Mowgli takes as an input a Muon object and populates its `obsm` and `uns` fiels 
 
 You may download a preprocessed 10X Multiome demo dataset [here](https://figshare.com/s/4c8e72cbb188d8e1cce8).
 
-A GPU is not required for small datasets, but is strongly recommmended above 1,000 cells.
+A GPU is not required for small datasets, but is strongly recommmended above 1,000 cells. On CPU, the [cell lines demo](https://mowgli.readthedocs.io/en/latest/vignettes/Liu%20cell%20lines.html) (206 cells) should run in under 5 minutes and the [PBMC demo](https://mowgli.readthedocs.io/en/latest/vignettes/PBMC.html) (500 cells) should run in under 10 minutes.
 
 ```python
 import mowgli
