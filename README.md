@@ -12,6 +12,8 @@ Mowgli is implemented as a Python package seamlessly integrated within the scver
 
 ### via PyPI (recommended)
 
+The easiest way to install Mowgli is via PyPI. Installation should typically take a minute.
+
 ```bash
 pip install mowgli
 ```
@@ -28,6 +30,8 @@ pip install ./Mowgli/
 Mowgli takes as an input a Muon object and populates its `obsm` and `uns` fiels with the embeddings and dictionaries, respectively. Visit [mowgli.rtfd.io](https://mowgli.rtfd.io/) for more documentation and tutorials.
 
 You may download a preprocessed 10X Multiome demo dataset [here](https://figshare.com/s/4c8e72cbb188d8e1cce8).
+
+A GPU is not required for small datasets, but is strongly recommmended above 1,000 cells.
 
 ```python
 import mowgli
