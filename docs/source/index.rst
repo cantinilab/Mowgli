@@ -50,6 +50,8 @@ Getting started
 
 Mowgli takes as an input a Muon object and populates its `obsm` and `uns` fiels with the embeddings and dictionaries, respectively. Visit the **Getting started** and **API** sections for more documentation and tutorials.
 
+You may download a 10X Multiome demo dataset at https://figshare.com/s/4c8e72cbb188d8e1cce8.
+
 .. code-block:: python
 
    from mowgli import models
