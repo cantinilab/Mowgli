@@ -1,6 +1,10 @@
-import scanpy as sc
-import mudata as md
 import anndata as ad
+import mudata as md
+import numpy as np
+import pandas as pd
+import scanpy as sc
+import seaborn as sns
+from matplotlib import pyplot as plt
 
 
 def clustermap(mdata: md.MuData, obsm: str = "W_OT", cmap="viridis", **kwds):
@@ -86,3 +90,72 @@ def heatmap(
     return sc.pl.heatmap(
         joint_embedding, var_names, groupby=groupby, cmap=cmap, save=save, **kwds
     )
+
+def enrich(enr: pd.DataFrame, query_name: str, n_terms: int = 10):
+    """Display a list of enriched terms.
+
+    Args:
+        enr (pd.DataFrame): The enrichment object returned by mowgli.tl.enrich()
+        query_name (str): The name of the query, e.g. "dimension 0".
+    """
+
+    # Subset the enrichment object to the query of interest.
+    sub_enr = enr[enr["query"] == query_name].head(n_terms)
+    sub_enr["minlogp"] = -np.log10(sub_enr["p_value"])
+
+    fig, ax = plt.subplots()
+
+    # Display the enriched terms.
+    ax.hlines(
+        y=sub_enr["name"],
+        xmin=0,
+        xmax=sub_enr["minlogp"],
+        color="lightgray",
+        zorder=1,
+        alpha=0.8,
+    )
+    sns.scatterplot(
+        data=sub_enr,
+        x="minlogp",
+        y="name",
+        hue="source",
+        s=100,
+        alpha=0.8,
+        ax=ax,
+        zorder=3,
+    )
+
+    ax.set_xlabel("$-log_{10}(p)$")
+    ax.set_ylabel("Enriched terms")
+
+    plt.show()
+
+def top_features(
+    mdata: md.MuData,
+    mod: str = "rna",
+    uns: str = "H_OT",
+    dim: int = 0,
+    n_top: int = 10,
+):
+    """Display the top features for a given dimension.
+
+    Args:
+        mdata (md.MuData): The input data
+        mod (str, optional): The modality to consider. Defaults to 'rna'.
+        uns (str, optional): The uns field to consider. Defaults to 'H_OT'.
+        dim (int, optional): The latent dimension. Defaults to 0.
+        n_top (int, optional): The number of top features to display. Defaults to 10.
+    """
+    
+    # Get the variable names.
+    var_names = mdata[mod].var_names[mdata[mod].var.highly_variable]
+
+    # Get the top features.
+    idx_top_features = np.argsort(mdata[mod].uns[uns][:, dim])[::-1][:n_top]
+    df = pd.DataFrame({
+        "features": var_names[idx_top_features],
+        "weights": mdata[mod].uns[uns][idx_top_features, dim]
+    })
+
+    # Display the top features.
+    sns.barplot(data=df, x="weights", y="features", palette="Blues_r")
