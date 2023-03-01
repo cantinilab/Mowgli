@@ -97,10 +97,11 @@ def knn_purity_score(knn: np.ndarray, labels: np.ndarray) -> float:
         matches = labels[neighbors] == labels[i]
 
         # Add the purity rate to the scores.
-        score += np.mean(matches)/knn.shape[0]
+        score += np.mean(matches) / knn.shape[0]
 
     # Return the average purity.
     return score
+
 
 #################################### EMBEDDING TO KNN ####################################
 

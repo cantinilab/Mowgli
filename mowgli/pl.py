@@ -91,6 +91,7 @@ def heatmap(
         joint_embedding, var_names, groupby=groupby, cmap=cmap, save=save, **kwds
     )
 
+
 def enrich(enr: pd.DataFrame, query_name: str, n_terms: int = 10):
     """Display a list of enriched terms.
 
@@ -130,6 +131,7 @@ def enrich(enr: pd.DataFrame, query_name: str, n_terms: int = 10):
 
     plt.show()
 
+
 def top_features(
     mdata: md.MuData,
     mod: str = "rna",
@@ -146,16 +148,18 @@ def top_features(
         dim (int, optional): The latent dimension. Defaults to 0.
         n_top (int, optional): The number of top features to display. Defaults to 10.
     """
-    
+
     # Get the variable names.
     var_names = mdata[mod].var_names[mdata[mod].var.highly_variable]
 
     # Get the top features.
     idx_top_features = np.argsort(mdata[mod].uns[uns][:, dim])[::-1][:n_top]
-    df = pd.DataFrame({
-        "features": var_names[idx_top_features],
-        "weights": mdata[mod].uns[uns][idx_top_features, dim]
-    })
+    df = pd.DataFrame(
+        {
+            "features": var_names[idx_top_features],
+            "weights": mdata[mod].uns[uns][idx_top_features, dim],
+        }
+    )
 
     # Display the top features.
     sns.barplot(data=df, x="weights", y="features", palette="Blues_r")
