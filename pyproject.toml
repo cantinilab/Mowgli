@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "mowgli"
-version = "0.1.1"
+version = "0.2.0"
 description = "Mowgli is a novel method for the integration of paired multi-omics data with any type and number of omics, combining integrative Nonnegative Matrix Factorization and Optimal Transport."
 authors = ["Geert-Jan Huizing <huizing@ens.fr>"]
 license = "GPL-3.0-only"
