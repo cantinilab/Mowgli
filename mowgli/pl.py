@@ -76,7 +76,8 @@ def heatmap(
     try:
         sc.pp.pca(joint_embedding)
         sc.tl.dendrogram(joint_embedding, groupby=groupby, use_rep="X_pca")
-    except:
+    except Exception:
+        print("Dendrogram not computed.")
         pass
 
     # Get the dimension names to show.

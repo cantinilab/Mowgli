@@ -1,15 +1,13 @@
 from typing import Iterable
+
+import anndata as ad
 import numpy as np
-from scipy.stats import pearsonr, spearmanr
-from sklearn.metrics import silhouette_score
+import scanpy as sc
 from scipy.spatial.distance import cdist
 from sklearn.metrics import adjusted_rand_score as ARI
 from sklearn.metrics import normalized_mutual_info_score as NMI
-import anndata as ad
-import scanpy as sc
+from sklearn.metrics import silhouette_score
 from tqdm import tqdm
-
-############################ BASED ON AN EMBEDDING ############################
 
 
 def embedding_silhouette_score(
@@ -66,9 +64,6 @@ def embedding_leiden_across_resolutions(
     return resolutions, aris, nmis
 
 
-################################ BASED ON A KNN ###############################
-
-
 def knn_purity_score(knn: np.ndarray, labels: np.ndarray) -> float:
     """Compute the kNN purity score, averaged over all observations.
     For one observation, the purity score is the percentage of
@@ -101,9 +96,6 @@ def knn_purity_score(knn: np.ndarray, labels: np.ndarray) -> float:
 
     # Return the average purity.
     return score
-
-
-#################################### EMBEDDING TO KNN ####################################
 
 
 def embedding_to_knn(

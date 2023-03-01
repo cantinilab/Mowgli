@@ -1,4 +1,4 @@
-from typing import Dict, Iterable, List
+from typing import Iterable, List
 import torch
 from scipy.spatial.distance import cdist
 import numpy as np

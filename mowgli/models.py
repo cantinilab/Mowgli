@@ -1,15 +1,13 @@
-import torch
-from torch import optim
-import torch.nn.functional as F
-
-import numpy as np
-from sklearn.decomposition import PCA
-
 from typing import Callable, List
-import mudata as md
-from tqdm import tqdm
 
+import mudata as md
+import numpy as np
+import torch
+import torch.nn.functional as F
 from mowgli import utils
+from sklearn.decomposition import PCA
+from torch import optim
+from tqdm import tqdm
 
 
 class MowgliModel:
@@ -148,7 +146,7 @@ class MowgliModel:
             cost = self.cost if isinstance(self.cost, str) else self.cost[mod]
             try:
                 cost_path = self.cost_path[mod]
-            except:
+            except Exception:
                 cost_path = None
 
             # Define the features that the ground cost will be computed on.
@@ -229,7 +227,7 @@ class MowgliModel:
         )
 
         # This is needed to save things in uns if it doesn't exist.
-        if mdata.uns == None:
+        if mdata.uns is None:
             mdata.uns = {}
 
         self.lr = lr
