@@ -1,6 +1,6 @@
 # Mowgli: Multi Omics Wasserstein inteGrative anaLysIs
 [![Tests](https://github.com/gjhuizing/Mowgli/actions/workflows/main.yml/badge.svg)](https://github.com/gjhuizing/Mowgli/actions/workflows/main.yml)
-[![codecov](https://codecov.io/gh/gjhuizing/Mowgli/branch/main/graph/badge.svg?token=UBUJF7098Q)](https://codecov.io/gh/gjhuizing/Mowgli)
+[![codecov](https://codecov.io/gh/cantinilab/Mowgli/branch/main/graph/badge.svg?token=UBUJF7098Q)](https://codecov.io/gh/cantinilab/Mowgli)
 [![Documentation Status](https://readthedocs.org/projects/mowgli/badge/?version=latest)](https://mowgli.readthedocs.io/en/latest/?badge=latest)
 [![PyPI version](https://img.shields.io/pypi/v/mowgli?color=blue)](https://img.shields.io/pypi/v/mowgli?color=blue)
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
