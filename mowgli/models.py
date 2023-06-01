@@ -15,7 +15,12 @@ class MowgliModel:
         self,
         latent_dim: int = 15,
         use_mod_weight: bool = False,
-        h_regularization: float = 5e-2,
+        h_regularization: float = {
+            "rna": 1e-2,
+            "adt": 1e-2,
+            "prot": 1e-2,
+            "atac": 1e-1,
+        },
         w_regularization: float = 5e-2,
         eps: float = 5e-2,
         cost: str = "cosine",
@@ -34,7 +39,8 @@ class MowgliModel:
                 obs field of each modality. Defaults to False.
             h_regularization (float, optional):
                 The entropy parameter for the dictionary. Small values mean
-                sparse dictionaries. Defaults to 5e-2.
+                sparse dictionaries. Defaults to 0.01 for RNA and ADT and 0.1
+                for ATAC. Other modalities should be specified by the user.
             w_regularization (float, optional):
                 The entropy parameter for the embedding. Small values mean
                 sparse vectors. Defaults to 5e-2.
