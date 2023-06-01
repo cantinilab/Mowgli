@@ -13,7 +13,7 @@ from tqdm import tqdm
 class MowgliModel:
     def __init__(
         self,
-        latent_dim: int = 15,
+        latent_dim: int = 50,
         use_mod_weight: bool = False,
         h_regularization: float = {
             "rna": 1e-2,
@@ -21,7 +21,7 @@ class MowgliModel:
             "prot": 1e-2,
             "atac": 1e-1,
         },
-        w_regularization: float = 5e-2,
+        w_regularization: float = 1e-3,
         eps: float = 5e-2,
         cost: str = "cosine",
         pca_cost: bool = False,
@@ -38,12 +38,14 @@ class MowgliModel:
                 cell. If `True`, the weights are expected in the `mod_weight`
                 obs field of each modality. Defaults to False.
             h_regularization (float, optional):
-                The entropy parameter for the dictionary. Small values mean
-                sparse dictionaries. Defaults to 0.01 for RNA and ADT and 0.1
-                for ATAC. Other modalities should be specified by the user.
+                The entropy parameter for the dictionary. Defaults to 0.01 for RNA
+                and ADT and 0.1 for ATAC. If needed, other modalities should be
+                specified by the user. We advise setting values between 0.001
+                (biological signal driven by very few features) and 1.0 (very
+                diffuse biological signals).
             w_regularization (float, optional):
-                The entropy parameter for the embedding. Small values mean
-                sparse vectors. Defaults to 5e-2.
+                The entropy parameter for the embedding. As with `h_regularization`,
+                small values mean sparse vectors. Defaults to 1e-3.
             eps (float, optional):
                 The entropy parameter for epsilon transport. Large values
                 decrease importance of individual genes. Defaults to 5e-2.
@@ -353,7 +355,7 @@ class MowgliModel:
         pbar,
         device: str,
     ) -> None:
-        """Optimize a fiven function.
+        """Optimize a given function.
 
         Args:
             loss_fn (Callable): The function to optimize.
