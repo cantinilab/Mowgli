@@ -190,11 +190,11 @@ class MowgliModel:
         max_iter_inner: int = 1_000,
         max_iter: int = 100,
         device: torch.device = "cpu",
-        dtype: torch.dtype = torch.float,
+        dtype: torch.dtype = torch.double,
         lr: float = 1,
         optim_name: str = "lbfgs",
-        tol_inner: float = 1e-9,
-        tol_outer: float = 1e-3,
+        tol_inner: float = 1e-12,
+        tol_outer: float = 1e-4,
         normalize_rows: bool = False,
     ) -> None:
         """Train the Mowgli model on an input MuData object.
@@ -211,7 +211,7 @@ class MowgliModel:
             device (torch.device, optional):
                 The device to work on. Defaults to 'cpu'.
             dtype (torch.dtype, optional):
-                The dtype to work with. Defaults to torch.float.
+                The dtype to work with. Defaults to torch.double.
             lr (float, optional):
                 The learning rate for the optimizer. The default is set
                 for LBFGS and should be changed otherwise. Defaults to 1.
@@ -220,10 +220,10 @@ class MowgliModel:
                 is advised, but requires more memory. Defaults to "lbfgs".
             tol_inner (float, optional):
                 The tolerance for the inner iterations before early stopping.
-                Defaults to 1e-9.
+                Defaults to 1e-12.
             tol_outer (float, optional):
                 The tolerance for the outer iterations before early stopping.
-                Defaults to 1e-3.
+                Defaults to 1e-4.
         """
 
         # First, initialize the different parameters.
