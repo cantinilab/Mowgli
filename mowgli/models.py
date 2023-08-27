@@ -11,6 +11,39 @@ from tqdm import tqdm
 
 
 class MowgliModel:
+    """The Mowgli model, which performs integrative NMF with an Optimal Transport loss.
+
+    Args:
+        latent_dim (int, optional):
+            The latent dimension of the model. Defaults to 15.
+        use_mod_weight (bool, optional):
+            Whether to use a different weight for each modality and each
+            cell. If `True`, the weights are expected in the `mod_weight`
+            obs field of each modality. Defaults to False.
+        h_regularization (float, optional):
+            The entropy parameter for the dictionary. Defaults to 0.01 for RNA
+            and ADT and 0.1 for ATAC. If needed, other modalities should be
+            specified by the user. We advise setting values between 0.001
+            (biological signal driven by very few features) and 1.0 (very
+            diffuse biological signals).
+        w_regularization (float, optional):
+            The entropy parameter for the embedding. As with `h_regularization`,
+            small values mean sparse vectors. Defaults to 1e-3.
+        eps (float, optional):
+            The entropy parameter for epsilon transport. Large values
+            decrease importance of individual genes. Defaults to 5e-2.
+        cost (str, optional):
+            The function used to compute an emprical ground cost. All
+            metrics from Scipy's `cdist` are allowed. Defaults to 'cosine'.
+        pca_cost (bool, optional):
+            If True, the emprical ground cost will be computed on PCA
+            embeddings rather than raw data. Defaults to False.
+        cost_path (dict, optional):
+            Will look for an existing cost as a `.npy` file at this
+            path. If not found, the cost will be computed then saved
+            there. Defaults to None.
+    """
+
     def __init__(
         self,
         latent_dim: int = 50,
@@ -27,39 +60,6 @@ class MowgliModel:
         pca_cost: bool = False,
         cost_path: dict = None,
     ):
-        """Initialize the Mowgli model, which performs integrative NMF with an
-        Optimal Transport loss.
-
-        Args:
-            latent_dim (int, optional):
-                The latent dimension of the model. Defaults to 15.
-            use_mod_weight (bool, optional):
-                Whether to use a different weight for each modality and each
-                cell. If `True`, the weights are expected in the `mod_weight`
-                obs field of each modality. Defaults to False.
-            h_regularization (float, optional):
-                The entropy parameter for the dictionary. Defaults to 0.01 for RNA
-                and ADT and 0.1 for ATAC. If needed, other modalities should be
-                specified by the user. We advise setting values between 0.001
-                (biological signal driven by very few features) and 1.0 (very
-                diffuse biological signals).
-            w_regularization (float, optional):
-                The entropy parameter for the embedding. As with `h_regularization`,
-                small values mean sparse vectors. Defaults to 1e-3.
-            eps (float, optional):
-                The entropy parameter for epsilon transport. Large values
-                decrease importance of individual genes. Defaults to 5e-2.
-            cost (str, optional):
-                The function used to compute an emprical ground cost. All
-                metrics from Scipy's `cdist` are allowed. Defaults to 'cosine'.
-            pca_cost (bool, optional):
-                If True, the emprical ground cost will be computed on PCA
-                embeddings rather than raw data. Defaults to False.
-            cost_path (dict, optional):
-                Will look for an existing cost as a `.npy` file at this
-                path. If not found, the cost will be computed then saved
-                there. Defaults to None.
-        """
 
         # Check that the user-defined parameters are valid.
         assert latent_dim > 0
