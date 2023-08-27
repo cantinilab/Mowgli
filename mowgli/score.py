@@ -41,6 +41,24 @@ def embedding_leiden_across_resolutions(
     n_neighbors: int,
     resolutions: Iterable[float] = np.arange(0.1, 2.1, 0.1),
 ):
+    """Compute the ARI and NMI for Leiden clustering on an embedding,
+    for various resolutions.
+
+    Args:
+        embedding (np.ndarray):
+            The embedding, shape (n_obs, n_latent)
+        labels (np.ndarray):
+            The labels, shape (n_obs,)
+        n_neighbors (int):
+            The number of neighbors to use for the kNN graph.
+        resolutions (Iterable[float], optional):
+            The resolutions to use for Leiden clustering. Defaults to
+            np.arange(0.1, 2.1, 0.1).
+
+    Returns:
+        Tuple[Iterable[float], Iterable[float], Iterable[float]]:
+            The resolutions, ARIs and NMIs.
+    """
     # Create an AnnData object with the joint embedding.
     joint_embedding = ad.AnnData(embedding)
 
