@@ -16,6 +16,9 @@ class MowgliModel:
     Args:
         latent_dim (int, optional):
             The latent dimension of the model. Defaults to 15.
+        highly_variable (bool, optional):
+            Whether to use highly variable features. Defaults to True.
+            For now, only True is supported.
         use_mod_weight (bool, optional):
             Whether to use a different weight for each modality and each
             cell. If `True`, the weights are expected in the `mod_weight`
@@ -47,6 +50,7 @@ class MowgliModel:
     def __init__(
         self,
         latent_dim: int = 50,
+        highly_variable: bool = True,
         use_mod_weight: bool = False,
         h_regularization: float = {
             "rna": 1e-2,
@@ -65,6 +69,8 @@ class MowgliModel:
         assert latent_dim > 0
         assert w_regularization > 0
         assert eps > 0
+        assert highly_variable is True
+        # TODO: Actually implement the use of highly_variable
 
         if isinstance(h_regularization, dict):
             for mod in h_regularization:
