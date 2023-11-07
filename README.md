@@ -29,6 +29,12 @@ git clone git@github.com:cantinilab/Mowgli.git
 pip install ./Mowgli/
 ```
 
+### Test your installation (optional)
+
+```bash
+pytest .
+```
+
 ## Getting started
 
 Mowgli takes as an input a Muon object and populates its `obsm` and `uns` fields with the embeddings and dictionaries, respectively. Visit [mowgli.rtfd.io](https://mowgli.rtfd.io/) for more documentation and tutorials.
