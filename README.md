@@ -6,7 +6,7 @@
 [![Code style: black](https://img.shields.io/badge/code%20style-black-000000.svg)](https://github.com/psf/black)
 [![DOI](https://zenodo.org/badge/391909874.svg)](https://zenodo.org/badge/latestdoi/391909874)
 
-Mowgli is a novel method for the integration of paired multi-omics data with any type and number of omics, combining integrative Nonnegative Matrix Factorization and Optimal Transport. [Read the preprint!](https://www.biorxiv.org/content/10.1101/2023.02.02.526825v2)
+Mowgli is a novel method for the integration of paired multi-omics data with any type and number of omics, combining integrative Nonnegative Matrix Factorization and Optimal Transport. [Read the paper!](https://www.nature.com/articles/s41467-023-43019-2)
 
 ![figure](figure.png)
 
@@ -61,16 +61,18 @@ sc.tl.umap(mdata)
 sc.pl.umap(mdata)
 ```
 
-## Our preprint
+## Publication
 
 ```bibtex
 @article{huizing2023paired,
   title={Paired single-cell multi-omics data integration with Mowgli},
-  author={Huizing, Geert-Jan and Deutschmann, Ina Maria and Peyre, Gabriel and Cantini, Laura},
-  journal={bioRxiv},
-  pages={2023--02},
+  author={Huizing, Geert-Jan and Deutschmann, Ina Maria and Peyr{\'e}, Gabriel and Cantini, Laura},
+  journal={Nature Communications},
+  volume={14},
+  number={1},
+  pages={7711},
   year={2023},
-  publisher={Cold Spring Harbor Laboratory}
+  publisher={Nature Publishing Group UK London}
 }
 ```
 
