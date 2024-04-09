@@ -139,15 +139,22 @@ def top_features(
     uns: str = "H_OT",
     dim: int = 0,
     n_top: int = 10,
+    ax: plt.axes = None, 
+    palette: str = 'Blues_r'
 ):
     """Display the top features for a given dimension.
 
     Args:
-        mdata (md.MuData): The input data
+        mdata (md.MuData): The input mdata object
         mod (str, optional): The modality to consider. Defaults to 'rna'.
         uns (str, optional): The uns field to consider. Defaults to 'H_OT'.
         dim (int, optional): The latent dimension. Defaults to 0.
         n_top (int, optional): The number of top features to display. Defaults to 10.
+        ax (plt.axes, optional): The axes to use. Defaults to None.
+        palette (str, optional): The color palette to use. Defaults to 'Blues_r'.
+
+    Returns:
+        plt.axes: The axes used.
     """
 
     # Get the variable names.
@@ -163,4 +170,9 @@ def top_features(
     )
 
     # Display the top features.
-    sns.barplot(data=df, x="weights", y="features", palette="Blues_r")
+    if ax is None:
+        ax = sns.barplot(data=df, x="weights", y="features", palette=palette)
+    else:
+        sns.barplot(data=df, x="weights", y="features", palette=palette, ax=ax)
+    
+    return ax
