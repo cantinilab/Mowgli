@@ -139,15 +139,22 @@ def top_features(
     uns: str = "H_OT",
     dim: int = 0,
     n_top: int = 10,
+    ax: plt.axes = None, 
+    palette: str = 'Blues_r'
 ):
     """Display the top features for a given dimension.
 
     Args:
-        mdata (md.MuData): The input data
+        mdata (md.MuData): The input mdata object
         mod (str, optional): The modality to consider. Defaults to 'rna'.
         uns (str, optional): The uns field to consider. Defaults to 'H_OT'.
         dim (int, optional): The latent dimension. Defaults to 0.
         n_top (int, optional): The number of top features to display. Defaults to 10.
+        ax (plt.axes, optional): The axes to use. Defaults to None.
+        palette (str, optional): The color palette to use. Defaults to 'Blues_r'.
+
+    Returns:
+        plt.axes: The axes used.
     """
 
     # Get the variable names.
@@ -163,4 +170,58 @@ def top_features(
     )
 
     # Display the top features.
-    sns.barplot(data=df, x="weights", y="features", palette="Blues_r")
+    if ax is None:
+        ax = sns.barplot(data=df, x="weights", y="features", palette=palette)
+    else:
+        sns.barplot(data=df, x="weights", y="features", palette=palette, ax=ax)
+    
+    return ax
+
+def umap(mdata: md.MuData, dim: int | list = 0,  rescale: bool = False, obsm: str = "W_OT", neighbours_key = None, **kwds):
+    """Wrapper around Scanpy's sc.pl.umap. Computes UMAP for a given latent dimension and plots it.
+    Args:
+        mdata (md.MuData): The input data
+        dim (int | list, optional): The latent dimension. Defaults to 0.
+        rescale (bool, optional): If True, Rescale the color palette across all plots to the maximum value in the weight matrix. Defaults to False.
+        obsm (str, optional): The embedding. Defaults to 'W_OT'.
+        neighbours_key (str, optional): The key for the neighbours in `mdata.uns` to use to compute neighbors. Defaults to None.
+    """
+
+    adata_tmp = ad.AnnData(mdata.obsm[obsm], obs=pd.DataFrame(index=mdata.obs.index))
+    
+    if isinstance(dim, int):
+        mowgli_cat = f"mowgli:{dim}"
+        
+    elif isinstance(dim ,list):
+        # clean dim of doubles and sort them
+        dim = sorted(list(set(dim)))
+        mowgli_cat = [f"mowgli:{x}" for x in dim]
+
+    else:
+        raise ValueError("dim must be an integer or a list of integers")
+
+    adata_tmp.obs[mowgli_cat] = adata_tmp.X[:, dim]
+
+    # check if neighbors exists
+    if neighbours_key is None:
+        print("Computing neighbors with scanpy default parameters")
+        neighbours_key = "mowgli_neighbors" # set the default neighbors key 
+        # compute neiughborts using all dimension in the mowgli matrix 
+        sc.pp.neighbors(adata_tmp, use_rep='X', key_added = neighbours_key)
+        
+    else:
+        if neighbours_key not in mdata.uns.keys():
+            raise ValueError(f"neighbours key {neighbours_key} not found in mdata.uns")
+        
+        adata_tmp.uns[neighbours_key] = mdata.uns[neighbours_key]
+
+    # compute umap 
+    print('Computing UMAP')
+    sc.tl.umap(adata_tmp, neighbors_key = neighbours_key)
+
+    # plot umap
+    if rescale:
+        vmax = adata_tmp.X.max()
+        sc.pl.umap(adata_tmp, color=mowgli_cat, size=18.5, alpha=0.4, vmax = vmax,  **kwds)
+    else:
+        sc.pl.umap(adata_tmp, color=mowgli_cat, size=18.5, alpha=0.4, **kwds)
