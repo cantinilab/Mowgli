@@ -78,9 +78,11 @@ Citation
 
   @article{huizing2023paired,
      title={Paired single-cell multi-omics data integration with Mowgli},
-     author={Huizing, Geert-Jan and Deutschmann, Ina Maria and Peyre, Gabriel and Cantini, Laura},
-     journal={bioRxiv},
-     pages={2023--02},
+     author={Huizing, Geert-Jan and Deutschmann, Ina Maria and Peyr{\'e}, Gabriel and Cantini, Laura},
+     journal={Nature Communications},
+     volume={14},
+     number={1},
+     pages={7711},
      year={2023},
-     publisher={Cold Spring Harbor Laboratory}
+     publisher={Nature Publishing Group UK London}
    }
