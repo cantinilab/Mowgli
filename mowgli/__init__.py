@@ -4,4 +4,4 @@ import mowgli.score
 import mowgli.tl
 import mowgli.utils
 
-__version__ = "0.3.0"
+__version__ = "0.4.0"
