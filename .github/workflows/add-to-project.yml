@@ -1,0 +1,25 @@
+# automation to add issues to tracker board (test)
+# dev: DC
+
+name: Add issues/PRs to Org Project
+
+on:
+  issues:
+    types: [opened, reopened, transferred, labeled]
+  pull_request:
+    types: [opened, reopened, ready_for_review, labeled]
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+
+jobs:
+  add_to_project:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Add item to org project
+        uses: actions/add-to-project@v1
+        with:
+          project-url: https://github.com/orgs/cantinilab/projects/2
+          github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
