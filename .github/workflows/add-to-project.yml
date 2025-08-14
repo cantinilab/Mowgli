@@ -23,19 +23,40 @@ jobs:
         with:
           project-url: https://github.com/orgs/cantinilab/projects/2
           github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
-      # 2) (ISSUES) make/update  label 'repo:<repo>'
-      - name: Ensure repo label exists (issues)
+      # 2) (ISSUES) add label to issue with repo name
+      - name: Create/Update + apply repo label (issues)
         if: github.event_name == 'issues'
-        uses: peter-evans/create-or-update-label@v4
+        uses: actions/github-script@v7
         with:
-          name: repo:${{ github.event.repository.name }}
-          color: 666666
-          description: Issue origin repository
+          script: |
+            const repoLabel = `repo:${context.repo.repo}`;
+  
+            // ensure label exists (create if 404)
+            try {
+              await github.rest.issues.getLabel({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                name: repoLabel
+              });
+            } catch (e) {
+              if (e.status === 404) {
+                await github.rest.issues.createLabel({
+                  owner: context.repo.owner,
+                  repo: context.repo.repo,
+                  name: repoLabel,
+                  color: '666666',
+                  description: 'Issue origin repository'
+                });
+              } else {
+                throw e;
+              }
+            }
+  
+            // add label to the issue
+            await github.rest.issues.addLabels({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              labels: [repoLabel]
+            });
 
-      # 3) (ISSUES) apply the label 'repo:<repo>' to the issue
-      - name: Add repo label to issue
-        if: github.event_name == 'issues'
-        uses: actions-ecosystem/action-add-labels@v1
-        with:
-          github_token: ${{ secrets.GITHUB_TOKEN }}
-          labels: repo:${{ github.event.repository.name }}
