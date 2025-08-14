@@ -23,3 +23,19 @@ jobs:
         with:
           project-url: https://github.com/orgs/cantinilab/projects/2
           github-token: ${{ secrets.ADD_TO_PROJECT_PAT }}
+      # 2) (ISSUES) make/update  label 'repo:<repo>'
+      - name: Ensure repo label exists (issues)
+        if: github.event_name == 'issues'
+        uses: peter-evans/create-or-update-label@v4
+        with:
+          name: repo:${{ github.event.repository.name }}
+          color: 666666
+          description: Issue origin repository
+
+      # 3) (ISSUES) apply the label 'repo:<repo>' to the issue
+      - name: Add repo label to issue
+        if: github.event_name == 'issues'
+        uses: actions-ecosystem/action-add-labels@v1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          labels: repo:${{ github.event.repository.name }}
